@@ -36,6 +36,7 @@ import com.SistemaConciliacion.Consiliacion.modules.conciliacion.service.Concili
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.service.ConciliacionImportService;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.service.ConciliacionManualPairService;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.service.ConciliacionMatchingService;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.excel.PlataformaImportTemplateBuilder;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.service.ConciliacionSessionService;
 
 @RestController
@@ -144,6 +145,21 @@ public class ConciliacionController {
 		byte[] data = conciliacionExportService.exportExcel(id);
 		return ResponseEntity.ok()
 				.header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"conciliacion-sesion-" + id + ".xlsx\"")
+				.contentType(MediaType.parseMediaType(
+						"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+				.body(data);
+	}
+
+	/**
+	 * Plantilla vacía con el mismo layout que el export TES / resumen bancario (compatible con
+	 * {@link com.SistemaConciliacion.Consiliacion.modules.conciliacion.excel.PlataformaWorkbookParser}).
+	 */
+	@GetMapping("/template/plataforma.xlsx")
+	public ResponseEntity<byte[]> plataformaImportTemplate() {
+		byte[] data = PlataformaImportTemplateBuilder.buildXlsx();
+		return ResponseEntity.ok()
+				.header(HttpHeaders.CONTENT_DISPOSITION,
+						"attachment; filename=\"plantilla-plataforma-resumen-bancario.xlsx\"")
 				.contentType(MediaType.parseMediaType(
 						"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
 				.body(data);

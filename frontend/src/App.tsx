@@ -1224,7 +1224,7 @@ function App() {
   return (
     <div
       className={
-        selectedId != null && detail != null && !detailLoading ? 'app app--wide-detail' : 'app'
+        selectedId != null ? 'app app--wide-detail' : 'app'
       }
     >
       <header className="app-header">
@@ -1238,22 +1238,33 @@ function App() {
         <section className="card import-card">
           <h2>Importar archivos</h2>
           <form onSubmit={handleImport} className="import-form">
-            <label className="file-label">
-              <span>Banco (Excel .xls o .xlsx)</span>
-              <input
-                type="file"
-                accept=".xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                onChange={(ev) => setBankFile(ev.target.files?.[0] ?? null)}
-              />
-            </label>
-            <label className="file-label">
-              <span>Empresa / plataforma (Excel .xls o .xlsx)</span>
-              <input
-                type="file"
-                accept=".xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                onChange={(ev) => setCompanyFile(ev.target.files?.[0] ?? null)}
-              />
-            </label>
+            <div className="import-form-files">
+              <label className="file-label">
+                <span>Banco (Excel .xls o .xlsx)</span>
+                <input
+                  className="import-file-input"
+                  type="file"
+                  accept=".xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                  onChange={(ev) => setBankFile(ev.target.files?.[0] ?? null)}
+                />
+              </label>
+              <label className="file-label">
+                <span>Empresa / plataforma (Excel .xls o .xlsx)</span>
+                <input
+                  className="import-file-input"
+                  type="file"
+                  accept=".xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                  onChange={(ev) => setCompanyFile(ev.target.files?.[0] ?? null)}
+                />
+                <a
+                  className="import-template-link"
+                  href="/api/v1/conciliacion/template/plataforma.xlsx"
+                  download="plantilla-plataforma-resumen-bancario.xlsx"
+                >
+                  Descargar plantilla
+                </a>
+              </label>
+            </div>
             <button type="submit" className="btn-import" disabled={importing}>
               {importing ? 'Importando…' : 'Importar'}
             </button>
@@ -1349,26 +1360,11 @@ function App() {
                 <span className="export-label">Exportar</span>
                 <a
                   className="export-link"
-                  href={`/api/v1/conciliacion/sessions/${selectedId}/export.csv?kind=PAIRS`}
-                  download
-                >
-                  CSV pares
-                </a>
-                <a
-                  className="export-link"
-                  href={`/api/v1/conciliacion/sessions/${selectedId}/export.csv?kind=PENDING`}
-                  download
-                >
-                  CSV pendientes
-                </a>
-                <a
-                  className="export-link"
                   href={`/api/v1/conciliacion/sessions/${selectedId}/export.xlsx`}
                   download={`conciliacion-sesion-${selectedId}.xlsx`}
                 >
                   Excel (.xlsx)
                 </a>
-                <span className="export-hint">Libro con resumen, pares y pendientes</span>
               </div>
 
               {conciliarResult && (
