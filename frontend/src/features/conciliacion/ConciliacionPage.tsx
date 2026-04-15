@@ -2150,7 +2150,7 @@ function MovimientosTable({
                 <td>{m.id}</td>
                 <td className="cell-date-nowrap">{formatDisplayDate(m.txDate)}</td>
                 <td>{m.amount}</td>
-                <td>{m.reference ?? '—'}</td>
+                <td className="cell-desc">{m.reference ?? '—'}</td>
                 <td className="cell-desc">{m.description ?? '—'}</td>
                 {showClassif && onClassificationChange && (
                   <td className="mov-clasif-td">

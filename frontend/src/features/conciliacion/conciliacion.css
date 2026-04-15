@@ -508,11 +508,19 @@ html[data-theme='dark'] .import-form-files .import-file-input::-webkit-file-uplo
   font-weight: 600;
 }
 
+/* Texto largo: ancho acotado; scroll horizontal sin barra visible (Shift+rueda, trackpad, arrastre). */
 .data-table .cell-desc {
-  max-width: 18rem;
+  max-width: 16rem;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-x: auto;
+  overflow-y: hidden;
+  vertical-align: middle;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.data-table .cell-desc::-webkit-scrollbar {
+  display: none;
 }
 
 p.subtle {
