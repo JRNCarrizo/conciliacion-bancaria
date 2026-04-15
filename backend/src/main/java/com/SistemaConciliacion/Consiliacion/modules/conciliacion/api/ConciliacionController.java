@@ -130,6 +130,15 @@ public class ConciliacionController {
 				body != null ? body : new ClassificationUpdateDto(null));
 	}
 
+	/** Clasificación única del par conciliado (una por fila, no duplicada en cada movimiento). */
+	@PutMapping(value = "/sessions/{id}/pairs/{pairId}/clasificacion", consumes = MediaType.APPLICATION_JSON_VALUE)
+	@ResponseStatus(HttpStatus.NO_CONTENT)
+	public void putPairClassification(@PathVariable long id, @PathVariable long pairId,
+			@RequestBody(required = false) ClassificationUpdateDto body) {
+		conciliacionSessionService.putPairClassification(id, pairId,
+				body != null ? body : new ClassificationUpdateDto(null));
+	}
+
 	@GetMapping("/sessions/{id}/pending/banco/{txId}/comentarios")
 	public List<PendingCommentDto> listBankPendingComments(@PathVariable long id, @PathVariable long txId) {
 		return conciliacionSessionService.listPendingComments(id, PendingMovementSide.BANK, txId);
@@ -152,6 +161,17 @@ public class ConciliacionController {
 			@RequestBody(required = false) CommentCreateDto body) {
 		return conciliacionSessionService.addPendingComment(id, PendingMovementSide.COMPANY, txId,
 				body != null ? body : new CommentCreateDto(""));
+	}
+
+	@GetMapping("/sessions/{id}/pairs/{pairId}/comentarios")
+	public List<PendingCommentDto> listPairComments(@PathVariable long id, @PathVariable long pairId) {
+		return conciliacionSessionService.listPairComments(id, pairId);
+	}
+
+	@PostMapping(value = "/sessions/{id}/pairs/{pairId}/comentarios", consumes = MediaType.APPLICATION_JSON_VALUE)
+	public PendingCommentDto addPairComment(@PathVariable long id, @PathVariable long pairId,
+			@RequestBody(required = false) CommentCreateDto body) {
+		return conciliacionSessionService.addPairComment(id, pairId, body != null ? body : new CommentCreateDto(""));
 	}
 
 	@GetMapping("/sessions/{id}/pending/banco/{txId}/adjuntos")

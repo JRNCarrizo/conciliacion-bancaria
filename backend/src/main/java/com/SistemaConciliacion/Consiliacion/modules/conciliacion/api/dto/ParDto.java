@@ -9,5 +9,5 @@ import java.time.LocalDate;
  */
 public record ParDto(long pairId, String matchSource, long bankTxId, long companyTxId, BigDecimal bankAmount,
 		BigDecimal companyAmount, LocalDate bankDate, LocalDate companyDate, String pairKind,
-		long pairAttachmentCount) {
+		long pairAttachmentCount, String classification, long pairCommentCount) {
 }

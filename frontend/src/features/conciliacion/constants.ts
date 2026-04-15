@@ -14,12 +14,3 @@ export const SESSION_STATUS_LABEL: Record<string, string> = {
   RECONCILED: 'Conciliada',
   CLOSED: 'Cerrada',
 }
-
-export const CLASSIFICATION_OPTIONS: { value: string; label: string }[] = [
-  { value: '', label: 'Sin clasificar' },
-  { value: 'COMISION', label: 'Comisión bancaria' },
-  { value: 'TRANSFERENCIA', label: 'Transferencia' },
-  { value: 'DEPOSITO_TRANSITO', label: 'Depósito en tránsito' },
-  { value: 'ERROR', label: 'Error' },
-  { value: 'OTRO', label: 'Otro' },
-]

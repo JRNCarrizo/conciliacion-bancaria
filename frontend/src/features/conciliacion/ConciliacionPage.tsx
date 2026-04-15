@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import './conciliacion.css'
-import { CLASSIFICATION_OPTIONS, SESSION_HISTORY_PAGE_SIZE, STATUS_LABEL } from './constants'
+import { SESSION_HISTORY_PAGE_SIZE, STATUS_LABEL } from './constants'
 import type {
   CompareFilterKind,
   ComparisonRow,
@@ -20,7 +20,7 @@ import type {
   SessionSummary,
 } from './types'
 import { parseError } from './api/http'
-import { rowMatchesSearch } from './utils/compareSearch'
+import { rowMatchesClassification, rowMatchesSearch } from './utils/compareSearch'
 import {
   coerceAmount,
   effectivePairKindFromAmounts,
@@ -617,6 +617,9 @@ function CompareFiltersBar({
   searchValue,
   onSearchChange,
   onSearchClear,
+  classificationValue,
+  classificationOptions,
+  onClassificationChange,
   dateFrom,
   dateTo,
   onDateFromChange,
@@ -626,6 +629,9 @@ function CompareFiltersBar({
   searchValue: string
   onSearchChange: (v: string) => void
   onSearchClear: () => void
+  classificationValue: string
+  classificationOptions: readonly string[]
+  onClassificationChange: (v: string) => void
   dateFrom: string
   dateTo: string
   onDateFromChange: (v: string) => void
@@ -641,21 +647,43 @@ function CompareFiltersBar({
     >
       <div className="compare-filters-bar__search" role="search" aria-label="Buscar movimientos">
         <span className="compare-date-toolbar-label">Buscar</span>
-        <div className="compare-search-controls">
-          <input
-            type="search"
-            className="compare-search-input"
-            value={searchValue}
-            onChange={(ev) => onSearchChange(ev.target.value)}
-            placeholder="ID, referencia, descripción, importe…"
-            aria-label="Buscar por ID, referencia, descripción o importe"
-            autoComplete="off"
-          />
-          {hasSearch && (
-            <button type="button" className="btn-secondary compare-search-clear" onClick={onSearchClear}>
-              Limpiar
-            </button>
-          )}
+        <div className="compare-filters-search-split">
+          <div className="compare-filters-search-half">
+            <div className="compare-search-controls compare-search-controls--half">
+              <input
+                type="search"
+                className="compare-search-input"
+                value={searchValue}
+                onChange={(ev) => onSearchChange(ev.target.value)}
+                placeholder="ID, referencia, descripción, importe…"
+                aria-label="Buscar por ID, referencia, descripción o importe"
+                autoComplete="off"
+              />
+              {hasSearch && (
+                <button type="button" className="btn-secondary compare-search-clear" onClick={onSearchClear}>
+                  Limpiar
+                </button>
+              )}
+            </div>
+          </div>
+          <div className="compare-filters-search-half">
+            <label className="compare-classif-filter-label">
+              <span className="compare-classif-filter-caption">Clasificación</span>
+              <select
+                className="compare-classif-filter-select"
+                value={classificationValue}
+                onChange={(ev) => onClassificationChange(ev.target.value)}
+                aria-label="Filtrar por clasificación"
+              >
+                <option value="">Todas</option>
+                {classificationOptions.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
         </div>
       </div>
       <div className="compare-filters-bar__dates" aria-label="Filtrar filas por fecha">
@@ -1028,30 +1056,68 @@ function ComparisonLegend({
   )
 }
 
-function ClassificationSelect({
+function ClassificationCombo({
   value,
-  onChange,
+  suggestions,
+  onCommit,
   disabled,
+  ariaLabel = 'Clasificación',
 }: {
   value: string | null | undefined
-  onChange: (v: string) => void
+  /** Valores ya usados en la sesión; se filtran según lo escrito. */
+  suggestions: readonly string[]
+  onCommit: (v: string) => void
   /** Sesión cerrada u otro bloqueo: solo lectura. */
   disabled?: boolean
+  ariaLabel?: string
 }) {
+  const listIdRaw = useId()
+  const listId = `clasif-dl-${listIdRaw.replace(/:/g, '')}`
+  const normalized = (value ?? '').trim()
+  const [text, setText] = useState(normalized)
+  useEffect(() => {
+    setText((value ?? '').trim())
+  }, [value])
+
+  const filteredOptions = useMemo(() => {
+    const pool = [...new Set(suggestions)].sort((a, b) => a.localeCompare(b, 'es'))
+    const q = text.trim().toLowerCase()
+    if (q.length === 0) {
+      return pool.slice(0, 50)
+    }
+    return pool.filter((s) => s.toLowerCase().includes(q)).slice(0, 50)
+  }, [suggestions, text])
+
   return (
-    <select
-      className="clasif-select"
-      value={value ?? ''}
-      disabled={disabled}
-      onChange={(ev) => onChange(ev.target.value)}
-      aria-label="Clasificación del pendiente"
-    >
-      {CLASSIFICATION_OPTIONS.map((o) => (
-        <option key={o.value || 'none'} value={o.value}>
-          {o.label}
-        </option>
-      ))}
-    </select>
+    <>
+      <datalist id={listId}>
+        {filteredOptions.map((s) => (
+          <option key={s} value={s} />
+        ))}
+      </datalist>
+      <input
+        type="text"
+        className="clasif-input"
+        list={listId}
+        value={text}
+        disabled={disabled}
+        placeholder="Sin clasificar"
+        autoComplete="off"
+        onChange={(ev) => setText(ev.target.value)}
+        onBlur={(ev) => {
+          const t = ev.currentTarget.value.trim()
+          if (t !== normalized) {
+            onCommit(t)
+          }
+        }}
+        onKeyDown={(ev) => {
+          if (ev.key === 'Enter') {
+            ev.currentTarget.blur()
+          }
+        }}
+        aria-label={ariaLabel}
+      />
+    </>
   )
 }
 
@@ -1684,6 +1750,136 @@ function PendingCommentSidePanel({
   )
 }
 
+function PairCommentPanel({
+  sessionId,
+  pairId,
+  sessionClosed,
+  onAfterChange,
+}: {
+  sessionId: number
+  pairId: number
+  sessionClosed: boolean
+  onAfterChange: () => void
+}) {
+  const [items, setItems] = useState<PendingCommentDto[]>([])
+  const [loading, setLoading] = useState(false)
+  const [posting, setPosting] = useState(false)
+  const [draft, setDraft] = useState('')
+  const [fetchError, setFetchError] = useState<string | null>(null)
+  const [postError, setPostError] = useState<string | null>(null)
+  const threadScrollRef = useRef<HTMLDivElement>(null)
+
+  const scrollThreadToBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {
+    const el = threadScrollRef.current
+    if (!el) return
+    const run = () => {
+      el.scrollTo({ top: el.scrollHeight, behavior })
+    }
+    requestAnimationFrame(() => {
+      requestAnimationFrame(run)
+    })
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    async function load() {
+      setLoading(true)
+      setFetchError(null)
+      setPostError(null)
+      try {
+        const r = await fetch(`/api/v1/conciliacion/sessions/${sessionId}/pairs/${pairId}/comentarios`)
+        if (!r.ok) throw new Error(await parseError(r))
+        const data = (await r.json()) as PendingCommentDto[]
+        if (!cancelled) setItems(data)
+      } catch (e) {
+        if (!cancelled) setFetchError(e instanceof Error ? e.message : String(e))
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    void load()
+    return () => {
+      cancelled = true
+    }
+  }, [sessionId, pairId])
+
+  useEffect(() => {
+    if (loading) return
+    scrollThreadToBottom('smooth')
+  }, [loading, items, scrollThreadToBottom])
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (sessionClosed) return
+    const text = draft.trim()
+    if (!text) return
+    setPosting(true)
+    setPostError(null)
+    try {
+      const r = await fetch(`/api/v1/conciliacion/sessions/${sessionId}/pairs/${pairId}/comentarios`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+      })
+      if (!r.ok) throw new Error(await parseError(r))
+      const created = (await r.json()) as PendingCommentDto
+      setItems((prev) => [...prev, created])
+      setDraft('')
+      onAfterChange()
+    } catch (e) {
+      setPostError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setPosting(false)
+    }
+  }
+
+  return (
+    <div>
+      <div ref={threadScrollRef} className="comment-thread-scroll" tabIndex={0}>
+        {loading && <p className="msg subtle">Cargando…</p>}
+        {!loading && fetchError && <p className="msg err">{fetchError}</p>}
+        {!loading && !fetchError && items.length === 0 && (
+          <p className="msg subtle">Todavía no hay mensajes. Escribí uno abajo.</p>
+        )}
+        {!loading &&
+          !fetchError &&
+          items.map((c) => (
+            <article key={c.id} className="comment-bubble">
+              <time className="comment-bubble-time" dateTime={c.createdAt}>
+                {formatCommentWhen(c.createdAt)}
+              </time>
+              <p className="comment-bubble-body">{c.body}</p>
+            </article>
+          ))}
+      </div>
+      <form className="comment-modal-form" onSubmit={(e) => void handleSubmit(e)}>
+        <label className="comment-modal-label">
+          <span>Nuevo mensaje</span>
+          <textarea
+            className="comment-modal-input"
+            rows={4}
+            value={draft}
+            disabled={sessionClosed || posting}
+            onChange={(ev) => setDraft(ev.target.value)}
+            placeholder="Ej.: lo vimos con contaduría el 12/4…"
+            maxLength={4000}
+          />
+        </label>
+        {postError && <p className="msg err comment-modal-form-err">{postError}</p>}
+        <div className="comment-modal-actions">
+          <button
+            type="submit"
+            className="btn-import"
+            disabled={sessionClosed || posting || draft.trim() === ''}
+          >
+            {posting ? 'Enviando…' : 'Enviar'}
+          </button>
+        </div>
+      </form>
+    </div>
+  )
+}
+
 function PendingCommentsModal({
   sessionId,
   target,
@@ -1727,26 +1923,16 @@ function PendingCommentsModal({
             </button>
           </header>
           <p className="comment-modal-hint">
-            El historial sigue guardado por movimiento; podés escribir en banco o en empresa según corresponda.
+            Un solo hilo por fila conciliada (par).
           </p>
           {sessionClosed && (
             <p className="msg subtle comment-modal-readonly">Sesión cerrada: solo lectura.</p>
           )}
-          <PendingCommentSidePanel
+          <PairCommentPanel
             sessionId={sessionId}
-            side="bank"
-            txId={target.bankTxId}
+            pairId={target.pairId}
             sessionClosed={sessionClosed}
             onAfterChange={onAfterChange}
-            showSideHeading
-          />
-          <PendingCommentSidePanel
-            sessionId={sessionId}
-            side="company"
-            txId={target.companyTxId}
-            sessionClosed={sessionClosed}
-            onAfterChange={onAfterChange}
-            showSideHeading
           />
         </div>
       </div>
@@ -1797,8 +1983,10 @@ function ComparisonTable({
   selectedId,
   sessionClosed,
   sessionAmountTolerance,
+  classificationSuggestions,
   onDeleteManual,
   onSetClassification,
+  onSetPairClassification,
   onOpenPendingComments,
   onOpenPendingAttachments,
 }: {
@@ -1810,8 +1998,12 @@ function ComparisonTable({
   sessionClosed: boolean
   /** Tolerancia de importe guardada en sesión (0 es válido). */
   sessionAmountTolerance: number | null | undefined
+  /** Clasificaciones ya usadas en la sesión (sugerencias al escribir). */
+  classificationSuggestions: readonly string[]
   onDeleteManual: (pairId: number) => void
   onSetClassification: (side: 'bank' | 'company', txId: number, classification: string) => void
+  /** Una sola clasificación por fila de par conciliado. */
+  onSetPairClassification: (pairId: number, classification: string) => void
   /** Conversación archivada por movimiento pendiente o por par (un solo control por fila conciliada). */
   onOpenPendingComments?: (target: PendingThreadTarget) => void
   /** Comprobantes adjuntos al pendiente o al par. */
@@ -1859,7 +2051,7 @@ function ComparisonTable({
               <td colSpan={13} className="compare-empty">
                 {allRowsCount === 0
                   ? 'No hay movimientos en esta sesión.'
-                  : 'No hay filas que coincidan. Probá «Todos», ampliá fechas, vaciá el buscador o cambiá el texto.'}
+                  : 'No hay filas que coincidan. Probá «Todos», ampliá fechas, vaciá el buscador o el filtro de clasificación, o cambiá el texto.'}
               </td>
             </tr>
           ) : (
@@ -1890,17 +2082,24 @@ function ComparisonTable({
                         '—'}
                     </td>
                     <td className="compare-delta">{deltaStr}</td>
-                    <td className="compare-muted">—</td>
+                    <td className="compare-td-clasif-pair">
+                      <ClassificationCombo
+                        value={pair.classification ?? undefined}
+                        suggestions={classificationSuggestions}
+                        disabled={sessionClosed}
+                        ariaLabel="Clasificación del par conciliado"
+                        onCommit={(v) => onSetPairClassification(pair.pairId, v)}
+                      />
+                    </td>
                     <td className="compare-td-notes">
                       <div className="compare-pending-tools">
                         {onOpenPendingComments ? (
                           <PendingConversationButton
-                            commentCount={(bank.commentCount ?? 0) + (company.commentCount ?? 0)}
+                            commentCount={pair.pairCommentCount ?? 0}
                             onClick={() =>
                               onOpenPendingComments({
                                 kind: 'pair',
-                                bankTxId: bank.id,
-                                companyTxId: company.id,
+                                pairId: pair.pairId,
                               })
                             }
                           />
@@ -1962,10 +2161,12 @@ function ComparisonTable({
                     </td>
                     <td className="compare-muted">—</td>
                     <td>
-                      <ClassificationSelect
+                      <ClassificationCombo
                         value={m.pendingClassification}
+                        suggestions={classificationSuggestions}
                         disabled={sessionClosed}
-                        onChange={(v) => onSetClassification('bank', m.id, v)}
+                        ariaLabel="Clasificación pendiente banco"
+                        onCommit={(v) => onSetClassification('bank', m.id, v)}
                       />
                     </td>
                     <td className="compare-td-notes">
@@ -2021,10 +2222,12 @@ function ComparisonTable({
                   </td>
                   <td className="compare-muted">—</td>
                   <td>
-                    <ClassificationSelect
+                    <ClassificationCombo
                       value={m.pendingClassification}
+                      suggestions={classificationSuggestions}
                       disabled={sessionClosed}
-                      onChange={(v) => onSetClassification('company', m.id, v)}
+                      ariaLabel="Clasificación pendiente empresa"
+                      onCommit={(v) => onSetClassification('company', m.id, v)}
                     />
                   </td>
                   <td className="compare-td-notes">
@@ -2092,6 +2295,7 @@ function CompleteViewLegendStatic() {
 function MovimientosTable({
   title,
   rows,
+  classificationSuggestions,
   onClassificationChange,
   classificationLocked,
   onOpenPendingComments,
@@ -2099,6 +2303,7 @@ function MovimientosTable({
 }: {
   title: string
   rows: MovimientoDto[]
+  classificationSuggestions: readonly string[]
   /** Pendientes: columna «Clasif.» con el mismo criterio que en comparativa / vista completa. */
   onClassificationChange?: (txId: number, classification: string) => void
   /** Sesión cerrada: selector deshabilitado. */
@@ -2154,10 +2359,11 @@ function MovimientosTable({
                 <td className="cell-desc">{m.description ?? '—'}</td>
                 {showClassif && onClassificationChange && (
                   <td className="mov-clasif-td">
-                    <ClassificationSelect
+                    <ClassificationCombo
                       value={m.pendingClassification}
+                      suggestions={classificationSuggestions}
                       disabled={classificationLocked}
-                      onChange={(v) => onClassificationChange(m.id, v)}
+                      onCommit={(v) => onClassificationChange(m.id, v)}
                     />
                   </td>
                 )}
@@ -2225,6 +2431,7 @@ export default function ConciliacionPage() {
   const [compareDateFrom, setCompareDateFrom] = useState('')
   const [compareDateTo, setCompareDateTo] = useState('')
   const [compareSearchQuery, setCompareSearchQuery] = useState('')
+  const [compareClassificationFilter, setCompareClassificationFilter] = useState('')
 
   const [commentTarget, setCommentTarget] = useState<PendingThreadTarget | null>(null)
   const [attachmentTarget, setAttachmentTarget] = useState<PendingAttachmentTarget | null>(null)
@@ -2266,8 +2473,13 @@ export default function ConciliacionPage() {
   )
 
   const filteredComparisonRows = useMemo(
-    () => rowsAfterLegendAndDate.filter((r) => rowMatchesSearch(r, compareSearchQuery)),
-    [rowsAfterLegendAndDate, compareSearchQuery],
+    () =>
+      rowsAfterLegendAndDate.filter(
+        (r) =>
+          rowMatchesSearch(r, compareSearchQuery) &&
+          rowMatchesClassification(r, compareClassificationFilter),
+      ),
+    [rowsAfterLegendAndDate, compareSearchQuery, compareClassificationFilter],
   )
 
   const filteredChronologicalRows = useMemo(
@@ -2276,9 +2488,11 @@ export default function ConciliacionPage() {
   )
 
   /** Misma lógica que Comparativa/Completa: estado + rango de fechas → tablas clásicas. */
-  const classicFilteredPairs = useMemo(
+  const classicFilteredPairRows = useMemo(
     () =>
-      filteredComparisonRows.filter((r) => r.kind === 'pair').map((r) => r.pair),
+      filteredComparisonRows.filter(
+        (r): r is Extract<ComparisonRow, { kind: 'pair' }> => r.kind === 'pair',
+      ),
     [filteredComparisonRows],
   )
 
@@ -2298,11 +2512,30 @@ export default function ConciliacionPage() {
     [filteredComparisonRows],
   )
 
+  const classificationSuggestions = useMemo(() => {
+    if (!detail) return []
+    const s = new Set<string>()
+    for (const t of detail.bankTransactions) {
+      const c = t.pendingClassification?.trim()
+      if (c) s.add(c)
+    }
+    for (const t of detail.companyTransactions) {
+      const c = t.pendingClassification?.trim()
+      if (c) s.add(c)
+    }
+    for (const p of detail.pairs) {
+      const c = p.classification?.trim()
+      if (c) s.add(c)
+    }
+    return Array.from(s).sort((a, b) => a.localeCompare(b, 'es'))
+  }, [detail])
+
   const compareRowFilterActive =
     compareFilter !== 'all' ||
     compareDateFrom !== '' ||
     compareDateTo !== '' ||
-    compareSearchQuery.trim() !== ''
+    compareSearchQuery.trim() !== '' ||
+    compareClassificationFilter.trim() !== ''
 
   const detailMatchesSelection =
     selectedId != null && detail != null && detail.session.id === selectedId
@@ -2397,6 +2630,7 @@ export default function ConciliacionPage() {
     setCompareDateFrom('')
     setCompareDateTo('')
     setCompareSearchQuery('')
+    setCompareClassificationFilter('')
     setCommentTarget(null)
     setAttachmentTarget(null)
     setPendingSessionTolerance(null)
@@ -2461,6 +2695,7 @@ export default function ConciliacionPage() {
     }
     setManualLoading(true)
     setManualError(null)
+    const y = window.scrollY
     try {
       const r = await fetch(`/api/v1/conciliacion/sessions/${selectedId}/pares`, {
         method: 'POST',
@@ -2473,8 +2708,9 @@ export default function ConciliacionPage() {
       if (!r.ok) throw new Error(await parseError(r))
       setManualBankId('')
       setManualCompanyId('')
-      await loadDetail(selectedId)
+      await loadDetail(selectedId, { soft: true })
       await loadSessionListPage(sessionListPage)
+      requestAnimationFrame(() => window.scrollTo({ top: y }))
     } catch (e) {
       setManualError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -2485,14 +2721,16 @@ export default function ConciliacionPage() {
   async function handleDeleteManualPair(pairId: number) {
     if (selectedId == null) return
     if (!window.confirm('¿Quitar este vínculo manual?')) return
+    const y = window.scrollY
     try {
       const r = await fetch(
         `/api/v1/conciliacion/sessions/${selectedId}/pares/${pairId}`,
         { method: 'DELETE' },
       )
       if (!r.ok) throw new Error(await parseError(r))
-      await loadDetail(selectedId)
+      await loadDetail(selectedId, { soft: true })
       await loadSessionListPage(sessionListPage)
+      requestAnimationFrame(() => window.scrollTo({ top: y }))
     } catch (e) {
       setManualError(e instanceof Error ? e.message : String(e))
     }
@@ -2563,6 +2801,7 @@ export default function ConciliacionPage() {
     classification: string,
   ) {
     if (selectedId == null) return
+    const y = window.scrollY
     const sub =
       side === 'bank'
         ? `pending/banco/${txId}/clasificacion`
@@ -2579,7 +2818,30 @@ export default function ConciliacionPage() {
         },
       )
       if (!r.ok) throw new Error(await parseError(r))
-      await loadDetail(selectedId)
+      await loadDetail(selectedId, { soft: true })
+      requestAnimationFrame(() => window.scrollTo({ top: y }))
+    } catch (e) {
+      setManualError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  async function handleSetPairClassification(pairId: number, classification: string) {
+    if (selectedId == null) return
+    const y = window.scrollY
+    try {
+      const r = await fetch(
+        `/api/v1/conciliacion/sessions/${selectedId}/pairs/${pairId}/clasificacion`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            classification: classification === '' ? null : classification,
+          }),
+        },
+      )
+      if (!r.ok) throw new Error(await parseError(r))
+      await loadDetail(selectedId, { soft: true })
+      requestAnimationFrame(() => window.scrollTo({ top: y }))
     } catch (e) {
       setManualError(e instanceof Error ? e.message : String(e))
     }
@@ -3039,8 +3301,9 @@ export default function ConciliacionPage() {
                   </h3>
                   <p className="hint compare-hint">
                     Tocá un color (o «Todos») para ver solo filas de ese estado; en la barra de abajo,
-                    buscá por ID, referencia, descripción o importe (izquierda) y acotá por fechas
-                    (derecha). La grilla se ordena: pares, pendientes banco, pendientes empresa.
+                    buscá por ID, referencia, descripción o importe (mitad izquierda), filtrá por
+                    clasificación si querés (mitad derecha) y acotá por fechas (extremo derecho). La
+                    grilla se ordena: pares, pendientes banco, pendientes empresa.
                     {effectiveSessionAmountTolerance !== undefined ? (
                       <>
                         {' '}
@@ -3063,6 +3326,9 @@ export default function ConciliacionPage() {
                     searchValue={compareSearchQuery}
                     onSearchChange={setCompareSearchQuery}
                     onSearchClear={() => setCompareSearchQuery('')}
+                    classificationValue={compareClassificationFilter}
+                    classificationOptions={classificationSuggestions}
+                    onClassificationChange={setCompareClassificationFilter}
                     dateFrom={compareDateFrom}
                     dateTo={compareDateTo}
                     onDateFromChange={setCompareDateFrom}
@@ -3078,9 +3344,13 @@ export default function ConciliacionPage() {
                     selectedId={selectedId}
                     sessionClosed={sessionClosed}
                     sessionAmountTolerance={effectiveSessionAmountTolerance}
+                    classificationSuggestions={classificationSuggestions}
                     onDeleteManual={(pairId) => void handleDeleteManualPair(pairId)}
                     onSetClassification={(side, txId, c) =>
                       void handleSetClassification(side, txId, c)
+                    }
+                    onSetPairClassification={(pairId, c) =>
+                      void handleSetPairClassification(pairId, c)
                     }
                     onOpenPendingComments={(t) => setCommentTarget(t)}
                     onOpenPendingAttachments={(t) => setAttachmentTarget(t)}
@@ -3098,14 +3368,17 @@ export default function ConciliacionPage() {
                   <p className="hint compare-hint">
                     Todas las filas en una sola tabla, ordenadas por fecha. En cada par se usa la
                     fecha más temprana entre banco y empresa. Los pendientes muestran solo un lado;
-                    el otro queda vacío (—). Debajo de la leyenda, la misma barra: búsqueda a la
-                    izquierda y fechas a la derecha.
+                    el otro queda vacío (—). Debajo de la leyenda, la misma barra: búsqueda y filtro por
+                    clasificación, y fechas a la derecha.
                   </p>
                   <CompleteViewLegendStatic />
                   <CompareFiltersBar
                     searchValue={compareSearchQuery}
                     onSearchChange={setCompareSearchQuery}
                     onSearchClear={() => setCompareSearchQuery('')}
+                    classificationValue={compareClassificationFilter}
+                    classificationOptions={classificationSuggestions}
+                    onClassificationChange={setCompareClassificationFilter}
                     dateFrom={compareDateFrom}
                     dateTo={compareDateTo}
                     onDateFromChange={setCompareDateFrom}
@@ -3121,9 +3394,13 @@ export default function ConciliacionPage() {
                     selectedId={selectedId}
                     sessionClosed={sessionClosed}
                     sessionAmountTolerance={effectiveSessionAmountTolerance}
+                    classificationSuggestions={classificationSuggestions}
                     onDeleteManual={(pairId) => void handleDeleteManualPair(pairId)}
                     onSetClassification={(side, txId, c) =>
                       void handleSetClassification(side, txId, c)
+                    }
+                    onSetPairClassification={(pairId, c) =>
+                      void handleSetPairClassification(pairId, c)
                     }
                     onOpenPendingComments={(t) => setCommentTarget(t)}
                     onOpenPendingAttachments={(t) => setAttachmentTarget(t)}
@@ -3134,13 +3411,14 @@ export default function ConciliacionPage() {
                   <h3 className="subsection-title">
                     Tablas clásicas (
                     {compareRowFilterActive
-                      ? `${classicFilteredPairs.length + classicFilteredUnmatchedBank.length + classicFilteredUnmatchedCompany.length} de ${comparisonRows.length}`
+                      ? `${classicFilteredPairRows.length + classicFilteredUnmatchedBank.length + classicFilteredUnmatchedCompany.length} de ${comparisonRows.length}`
                       : `${comparisonRows.length} filas`}
                     )
                   </h3>
                   <p className="hint compare-hint">
-                    Mismos filtros que en Comparativa: tipo de fila, búsqueda (ID, ref., importe) y
-                    fechas; las tres tablas muestran solo lo que cumple todos los criterios activos.
+                    Mismos filtros que en Comparativa: tipo de fila, búsqueda (ID, ref., importe),
+                    clasificación y fechas; las tres tablas muestran solo lo que cumple todos los
+                    criterios activos.
                   </p>
                   <ComparisonLegend
                     filter={compareFilter}
@@ -3151,6 +3429,9 @@ export default function ConciliacionPage() {
                     searchValue={compareSearchQuery}
                     onSearchChange={setCompareSearchQuery}
                     onSearchClear={() => setCompareSearchQuery('')}
+                    classificationValue={compareClassificationFilter}
+                    classificationOptions={classificationSuggestions}
+                    onClassificationChange={setCompareClassificationFilter}
                     dateFrom={compareDateFrom}
                     dateTo={compareDateTo}
                     onDateFromChange={setCompareDateFrom}
@@ -3163,11 +3444,11 @@ export default function ConciliacionPage() {
                   <h3 className="subsection-title">
                     Pares encontrados (
                     {compareRowFilterActive
-                      ? `${classicFilteredPairs.length} de ${detail.pairs.length}`
+                      ? `${classicFilteredPairRows.length} de ${detail.pairs.length}`
                       : `${detail.pairs.length}`}
                     )
                   </h3>
-                  {detail.pairs.length > 0 && classicFilteredPairs.length === 0 ? (
+                  {detail.pairs.length > 0 && classicFilteredPairRows.length === 0 ? (
                     <p className="msg subtle">
                       Ningún par coincide con el filtro actual (probá «Todos», otra búsqueda o ampliá
                       fechas).
@@ -3182,30 +3463,45 @@ export default function ConciliacionPage() {
                             <th>Importe empresa</th>
                             <th>Fecha banco</th>
                             <th>Fecha empresa</th>
+                            <th>Clasif.</th>
                             <th></th>
                           </tr>
                         </thead>
                         <tbody>
-                          {classicFilteredPairs.map((p) => (
-                            <tr key={p.pairId}>
-                              <td>{p.matchSource}</td>
-                              <td>{p.bankAmount}</td>
-                              <td>{p.companyAmount}</td>
-                              <td className="cell-date-nowrap">{formatDisplayDate(p.bankDate)}</td>
-                              <td className="cell-date-nowrap">{formatDisplayDate(p.companyDate)}</td>
-                              <td>
-                                {p.matchSource === 'MANUAL' && selectedId != null && !sessionClosed && (
-                                  <button
-                                    type="button"
-                                    className="btn-link danger"
-                                    onClick={() => void handleDeleteManualPair(p.pairId)}
-                                  >
-                                    Quitar
-                                  </button>
-                                )}
-                              </td>
-                            </tr>
-                          ))}
+                          {classicFilteredPairRows.map((row) => {
+                            const { pair: p } = row
+                            return (
+                              <tr key={p.pairId}>
+                                <td>{p.matchSource}</td>
+                                <td>{p.bankAmount}</td>
+                                <td>{p.companyAmount}</td>
+                                <td className="cell-date-nowrap">{formatDisplayDate(p.bankDate)}</td>
+                                <td className="cell-date-nowrap">{formatDisplayDate(p.companyDate)}</td>
+                                <td className="mov-clasif-td">
+                                  <ClassificationCombo
+                                    value={p.classification ?? undefined}
+                                    suggestions={classificationSuggestions}
+                                    disabled={sessionClosed}
+                                    ariaLabel="Clasificación del par conciliado"
+                                    onCommit={(v) => void handleSetPairClassification(p.pairId, v)}
+                                  />
+                                </td>
+                                <td>
+                                  {p.matchSource === 'MANUAL' &&
+                                    selectedId != null &&
+                                    !sessionClosed && (
+                                      <button
+                                        type="button"
+                                        className="btn-link danger"
+                                        onClick={() => void handleDeleteManualPair(p.pairId)}
+                                      >
+                                        Quitar
+                                      </button>
+                                    )}
+                                </td>
+                              </tr>
+                            )
+                          })}
                         </tbody>
                       </table>
                     </div>
@@ -3213,6 +3509,7 @@ export default function ConciliacionPage() {
                   <MovimientosTable
                     title="Pendientes banco"
                     rows={classicFilteredUnmatchedBank}
+                    classificationSuggestions={classificationSuggestions}
                     classificationLocked={sessionClosed}
                     onClassificationChange={(txId, c) =>
                       void handleSetClassification('bank', txId, c)
@@ -3227,6 +3524,7 @@ export default function ConciliacionPage() {
                   <MovimientosTable
                     title="Pendientes empresa (plataforma)"
                     rows={classicFilteredUnmatchedCompany}
+                    classificationSuggestions={classificationSuggestions}
                     classificationLocked={sessionClosed}
                     onClassificationChange={(txId, c) =>
                       void handleSetClassification('company', txId, c)

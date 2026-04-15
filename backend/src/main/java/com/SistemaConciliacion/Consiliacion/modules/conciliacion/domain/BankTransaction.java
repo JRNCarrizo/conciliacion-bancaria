@@ -9,8 +9,6 @@ import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
-import jakarta.persistence.EnumType;
-import jakarta.persistence.Enumerated;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
@@ -39,9 +37,8 @@ public class BankTransaction {
 	@Column(length = 255)
 	private String reference;
 
-	@Enumerated(EnumType.STRING)
-	@Column(name = "pending_classification", length = 32)
-	private PendingClassification pendingClassification;
+	@Column(name = "pending_classification", length = 128)
+	private String pendingClassification;
 
 	public Long getId() {
 		return id;
@@ -91,11 +88,11 @@ public class BankTransaction {
 		this.reference = reference;
 	}
 
-	public PendingClassification getPendingClassification() {
+	public String getPendingClassification() {
 		return pendingClassification;
 	}
 
-	public void setPendingClassification(PendingClassification pendingClassification) {
+	public void setPendingClassification(String pendingClassification) {
 		this.pendingClassification = pendingClassification;
 	}
 }

@@ -7,10 +7,10 @@ html {
 
 html[data-theme='light'] {
   color-scheme: light;
-  /* Fondo de página más marcado; paneles en --surface y bordes más visibles */
+  /* Fondo de página blanco; paneles en --surface para separar bloques */
   --text: #3f3a47;
   --text-h: #0c0a10;
-  --bg: #d2cdc4;
+  --bg: #ffffff;
   --surface: #fafaf8;
   --border: #9a939f;
   --code-bg: #c4beb2;

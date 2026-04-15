@@ -42,6 +42,10 @@ public class ReconciliationPair {
 	@Column(name = "match_source", nullable = false, length = 16)
 	private MatchSource matchSource = MatchSource.AUTO;
 
+	/** Clasificación única del par (no se duplica en banco/empresa). */
+	@Column(name = "classification", length = 128)
+	private String classification;
+
 	@Column(name = "created_at", nullable = false)
 	private Instant createdAt;
 
@@ -90,6 +94,14 @@ public class ReconciliationPair {
 
 	public void setMatchSource(MatchSource matchSource) {
 		this.matchSource = matchSource;
+	}
+
+	public String getClassification() {
+		return classification;
+	}
+
+	public void setClassification(String classification) {
+		this.classification = classification;
 	}
 
 	public Instant getCreatedAt() {

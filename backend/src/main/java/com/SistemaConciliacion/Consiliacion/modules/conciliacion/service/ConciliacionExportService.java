@@ -203,7 +203,7 @@ public class ConciliacionExportService {
 		Sheet sh = wb.createSheet("Conciliados");
 		String[] headers = { "Fecha banco", "Fecha empresa", "ID par", "ID banco", "ID empresa", "Ref. banco",
 				"Descripción banco", "Ref. empresa", "Descripción empresa", "Importe banco", "Importe empresa",
-				"Neto contable (empresa)", "Estado del par", "Match" };
+				"Neto contable (empresa)", "Clasificación", "Estado del par", "Match" };
 		Row h = sh.createRow(0);
 		for (int i = 0; i < headers.length; i++) {
 			h.createCell(i).setCellValue(headers[i]);
@@ -235,6 +235,7 @@ public class ConciliacionExportService {
 			BigDecimal acc = c.accountingAmount();
 			BigDecimal neto = acc != null ? acc : c.amount().negate();
 			row.createCell(col++).setCellValue(neto.doubleValue());
+			row.createCell(col++).setCellValue(emptyToBlank(p.classification()));
 			row.createCell(col++).setCellValue(pairKindLabelEs(p.pairKind()));
 			row.createCell(col++).setCellValue(matchSourceLabel(p.matchSource()));
 		}
@@ -409,16 +410,17 @@ public class ConciliacionExportService {
 		sb.append(String.join(",",
 				"tipo_match", "id_par", "id_banco", "fecha_banco", "importe_banco", "ref_banco", "desc_banco",
 				"id_empresa", "fecha_empresa", "importe_empresa_conciliacion", "neto_contable_haber_menos_debe",
-				"ref_empresa", "desc_empresa")).append('\n');
+				"ref_empresa", "desc_empresa", "clasificacion")).append('\n');
 		for (ReconciliationPair p : pairs) {
 			BankTransaction b = p.getBankTransaction();
 			CompanyTransaction c = p.getCompanyTransaction();
 			BigDecimal acc = c.getAccountingAmount();
 			String neto = acc != null ? acc.toPlainString() : c.getAmount().negate().toPlainString();
+			String cls = p.getClassification() == null ? "" : p.getClassification();
 			sb.append(csvRow(p.getMatchSource().name(), String.valueOf(p.getId()), String.valueOf(b.getId()),
 					String.valueOf(b.getTxDate()), b.getAmount().toPlainString(), csvCell(b.getReference()),
 					csvCell(b.getDescription()), String.valueOf(c.getId()), String.valueOf(c.getTxDate()),
-					c.getAmount().toPlainString(), neto, csvCell(c.getReference()), csvCell(c.getDescription())))
+					c.getAmount().toPlainString(), neto, csvCell(c.getReference()), csvCell(c.getDescription()), cls))
 					.append('\n');
 		}
 		return sb.toString();
@@ -439,7 +441,7 @@ public class ConciliacionExportService {
 				"referencia", "descripcion", "clasificacion")).append('\n');
 		for (BankTransaction b : banks) {
 			if (!matchedBank.contains(b.getId())) {
-				String cls = b.getPendingClassification() == null ? "" : b.getPendingClassification().name();
+				String cls = b.getPendingClassification() == null ? "" : b.getPendingClassification();
 				sb.append(csvRow("BANCO", String.valueOf(b.getId()), String.valueOf(b.getTxDate()),
 						b.getAmount().toPlainString(), "", csvCell(b.getReference()), csvCell(b.getDescription()), cls))
 						.append('\n');
@@ -447,7 +449,7 @@ public class ConciliacionExportService {
 		}
 		for (CompanyTransaction c : companies) {
 			if (!matchedCompany.contains(c.getId())) {
-				String cls = c.getPendingClassification() == null ? "" : c.getPendingClassification().name();
+				String cls = c.getPendingClassification() == null ? "" : c.getPendingClassification();
 				BigDecimal acc = c.getAccountingAmount();
 				String neto = acc != null ? acc.toPlainString() : c.getAmount().negate().toPlainString();
 				sb.append(csvRow("EMPRESA", String.valueOf(c.getId()), String.valueOf(c.getTxDate()),

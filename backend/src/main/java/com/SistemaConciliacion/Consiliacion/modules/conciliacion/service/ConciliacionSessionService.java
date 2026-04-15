@@ -30,10 +30,10 @@ import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.Session
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.SessionSummaryDto;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.BankTransaction;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.CompanyTransaction;
-import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.PendingClassification;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.PendingMovementComment;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.PendingMovementSide;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.ReconciliationPair;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.ReconciliationPairComment;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.ReconciliationSession;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.SessionStatus;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.repository.BankTransactionRepository;
@@ -41,6 +41,7 @@ import com.SistemaConciliacion.Consiliacion.modules.conciliacion.repository.Comp
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.repository.MovementAttachmentRepository;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.repository.PairAttachmentRepository;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.repository.PendingMovementCommentRepository;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.repository.ReconciliationPairCommentRepository;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.repository.ReconciliationPairRepository;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.repository.ReconciliationSessionRepository;
 
@@ -56,6 +57,7 @@ public class ConciliacionSessionService {
 	private final PendingMovementCommentRepository pendingMovementCommentRepository;
 	private final MovementAttachmentRepository movementAttachmentRepository;
 	private final PairAttachmentRepository pairAttachmentRepository;
+	private final ReconciliationPairCommentRepository reconciliationPairCommentRepository;
 
 	public ConciliacionSessionService(ReconciliationSessionRepository sessionRepository,
 			BankTransactionRepository bankTransactionRepository,
@@ -63,7 +65,8 @@ public class ConciliacionSessionService {
 			ReconciliationPairRepository reconciliationPairRepository,
 			PendingMovementCommentRepository pendingMovementCommentRepository,
 			MovementAttachmentRepository movementAttachmentRepository,
-			PairAttachmentRepository pairAttachmentRepository) {
+			PairAttachmentRepository pairAttachmentRepository,
+			ReconciliationPairCommentRepository reconciliationPairCommentRepository) {
 		this.sessionRepository = sessionRepository;
 		this.bankTransactionRepository = bankTransactionRepository;
 		this.companyTransactionRepository = companyTransactionRepository;
@@ -71,6 +74,7 @@ public class ConciliacionSessionService {
 		this.pendingMovementCommentRepository = pendingMovementCommentRepository;
 		this.movementAttachmentRepository = movementAttachmentRepository;
 		this.pairAttachmentRepository = pairAttachmentRepository;
+		this.reconciliationPairCommentRepository = reconciliationPairCommentRepository;
 	}
 
 	@Transactional(readOnly = true)
@@ -106,6 +110,14 @@ public class ConciliacionSessionService {
 		Set<Long> duplicateBankIds = duplicateIdsBank(banks);
 		Set<Long> duplicateCompanyIds = duplicateIdsCompany(companies);
 
+		Map<Long, String> classificationByMatchedBankTxId = new HashMap<>();
+		Map<Long, String> classificationByMatchedCompanyTxId = new HashMap<>();
+		for (ReconciliationPair p : pairs) {
+			String cl = p.getClassification();
+			classificationByMatchedBankTxId.put(p.getBankTransaction().getId(), cl);
+			classificationByMatchedCompanyTxId.put(p.getCompanyTransaction().getId(), cl);
+		}
+
 		List<BankTransaction> unmatchedBankEntities = banks.stream().filter(t -> !matchedBankIds.contains(t.getId()))
 				.toList();
 		List<CompanyTransaction> unmatchedCompanyEntities = companies.stream()
@@ -118,16 +130,19 @@ public class ConciliacionSessionService {
 		Map<String, Long> commentCounts = commentCountMap(sessionId);
 		Map<String, Long> attachmentCounts = attachmentCountMap(sessionId);
 		Map<Long, Long> pairAttachmentCounts = pairAttachmentCountMap(sessionId);
+		Map<Long, Long> pairCommentCounts = pairCommentCountMap(sessionId);
 
 		List<MovimientoDto> bankDtos = banks.stream()
 				.map(t -> toBankMov(t, duplicateBankIds.contains(t.getId()), null, null,
 						commentCounts.getOrDefault(commentKey(PendingMovementSide.BANK, t.getId()), 0L),
-						attachmentCounts.getOrDefault(commentKey(PendingMovementSide.BANK, t.getId()), 0L)))
+						attachmentCounts.getOrDefault(commentKey(PendingMovementSide.BANK, t.getId()), 0L),
+						classificationDisplayForBank(t, classificationByMatchedBankTxId)))
 				.toList();
 		List<MovimientoDto> companyDtos = companies.stream()
 				.map(c -> toCompanyMov(c, duplicateCompanyIds.contains(c.getId()), null, null,
 						commentCounts.getOrDefault(commentKey(PendingMovementSide.COMPANY, c.getId()), 0L),
-						attachmentCounts.getOrDefault(commentKey(PendingMovementSide.COMPANY, c.getId()), 0L)))
+						attachmentCounts.getOrDefault(commentKey(PendingMovementSide.COMPANY, c.getId()), 0L),
+						classificationDisplayForCompany(c, classificationByMatchedCompanyTxId)))
 				.toList();
 		List<MovimientoDto> unmatchedBank = unmatchedBankEntities.stream()
 				.map(t -> toBankMov(t, duplicateBankIds.contains(t.getId()), fuzzyBankToCompany.get(t.getId()),
@@ -135,7 +150,8 @@ public class ConciliacionSessionService {
 								? fuzzyHint("empresa", fuzzyBankToCompany.get(t.getId()))
 								: null,
 						commentCounts.getOrDefault(commentKey(PendingMovementSide.BANK, t.getId()), 0L),
-						attachmentCounts.getOrDefault(commentKey(PendingMovementSide.BANK, t.getId()), 0L)))
+						attachmentCounts.getOrDefault(commentKey(PendingMovementSide.BANK, t.getId()), 0L),
+						classificationDisplayForBank(t, classificationByMatchedBankTxId)))
 				.toList();
 		List<MovimientoDto> unmatchedCompany = unmatchedCompanyEntities.stream()
 				.map(c -> toCompanyMov(c, duplicateCompanyIds.contains(c.getId()), fuzzyCompanyToBank.get(c.getId()),
@@ -143,12 +159,14 @@ public class ConciliacionSessionService {
 								? fuzzyHint("banco", fuzzyCompanyToBank.get(c.getId()))
 								: null,
 						commentCounts.getOrDefault(commentKey(PendingMovementSide.COMPANY, c.getId()), 0L),
-						attachmentCounts.getOrDefault(commentKey(PendingMovementSide.COMPANY, c.getId()), 0L)))
+						attachmentCounts.getOrDefault(commentKey(PendingMovementSide.COMPANY, c.getId()), 0L),
+						classificationDisplayForCompany(c, classificationByMatchedCompanyTxId)))
 				.toList();
 		BigDecimal gapThreshold = amountGapClassificationThreshold(s);
 		List<ParDto> parDtos = pairs.stream()
 				.map((ReconciliationPair p) -> toPar(p, gapThreshold,
-						pairAttachmentCounts.getOrDefault(p.getId(), 0L)))
+						pairAttachmentCounts.getOrDefault(p.getId(), 0L),
+						pairCommentCounts.getOrDefault(p.getId(), 0L)))
 				.toList();
 
 		ConciliacionStatsDto stats = buildStats(s, banks, companies, pairs, matchedBankIds, matchedCompanyIds,
@@ -196,11 +214,11 @@ public class ConciliacionSessionService {
 		}
 		if (reconciliationPairRepository.existsByBankTransaction_Id(bankTxId)) {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-					"Solo se clasifican movimientos pendientes (sin par).");
+					"Este movimiento está en un par conciliado; la clasificación es una sola por fila (usá el par).");
 		}
 		BankTransaction t = bankTransactionRepository.findByIdAndSession_Id(bankTxId, sessionId)
 				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Movimiento no encontrado"));
-		t.setPendingClassification(parseClassification(body != null ? body.classification() : null));
+		t.setPendingClassification(normalizeClassification(body != null ? body.classification() : null));
 		bankTransactionRepository.save(t);
 	}
 
@@ -214,12 +232,26 @@ public class ConciliacionSessionService {
 		}
 		if (reconciliationPairRepository.existsByCompanyTransaction_Id(companyTxId)) {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-					"Solo se clasifican movimientos pendientes (sin par).");
+					"Este movimiento está en un par conciliado; la clasificación es una sola por fila (usá el par).");
 		}
 		CompanyTransaction t = companyTransactionRepository.findByIdAndSession_Id(companyTxId, sessionId)
 				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Movimiento no encontrado"));
-		t.setPendingClassification(parseClassification(body != null ? body.classification() : null));
+		t.setPendingClassification(normalizeClassification(body != null ? body.classification() : null));
 		companyTransactionRepository.save(t);
+	}
+
+	@Transactional
+	public void putPairClassification(long sessionId, long pairId, ClassificationUpdateDto body) {
+		ReconciliationSession session = sessionRepository.findById(sessionId)
+				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sesión no encontrada"));
+		if (session.getStatus() == SessionStatus.CLOSED) {
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+					"La sesión está cerrada; la clasificación no se puede modificar.");
+		}
+		ReconciliationPair pair = reconciliationPairRepository.findByIdAndSession_Id(pairId, sessionId)
+				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Par no encontrado"));
+		pair.setClassification(normalizeClassification(body != null ? body.classification() : null));
+		reconciliationPairRepository.save(pair);
 	}
 
 	@Transactional(readOnly = true)
@@ -264,16 +296,54 @@ public class ConciliacionSessionService {
 		return new PendingCommentDto(c.getId(), c.getBody(), c.getCreatedAt());
 	}
 
-	private static PendingClassification parseClassification(String raw) {
+	@Transactional(readOnly = true)
+	public List<PendingCommentDto> listPairComments(long sessionId, long pairId) {
+		sessionRepository.findById(sessionId)
+				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sesión no encontrada"));
+		reconciliationPairRepository.findByIdAndSession_Id(pairId, sessionId)
+				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Par no encontrado"));
+		return reconciliationPairCommentRepository.findBySession_IdAndPair_IdOrderByCreatedAtAsc(sessionId, pairId)
+				.stream().map(c -> new PendingCommentDto(c.getId(), c.getBody(), c.getCreatedAt())).toList();
+	}
+
+	@Transactional
+	public PendingCommentDto addPairComment(long sessionId, long pairId, CommentCreateDto dto) {
+		ReconciliationSession session = sessionRepository.findById(sessionId)
+				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sesión no encontrada"));
+		if (session.getStatus() == SessionStatus.CLOSED) {
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+					"La sesión está cerrada; no se pueden agregar comentarios.");
+		}
+		ReconciliationPair pair = reconciliationPairRepository.findByIdAndSession_Id(pairId, sessionId)
+				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Par no encontrado"));
+		String text = dto == null || dto.text() == null ? "" : dto.text().trim();
+		if (text.isEmpty()) {
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "El comentario no puede estar vacío.");
+		}
+		if (text.length() > 4000) {
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "El comentario supera los 4000 caracteres.");
+		}
+		ReconciliationPairComment c = new ReconciliationPairComment();
+		c.setSession(session);
+		c.setPair(pair);
+		c.setBody(text);
+		c.setCreatedAt(Instant.now());
+		reconciliationPairCommentRepository.save(c);
+		return new PendingCommentDto(c.getId(), c.getBody(), c.getCreatedAt());
+	}
+
+	private static final int MAX_CLASSIFICATION_LEN = 128;
+
+	private static String normalizeClassification(String raw) {
 		if (raw == null || raw.isBlank()) {
 			return null;
 		}
-		try {
-			return PendingClassification.valueOf(raw.trim().toUpperCase());
-		} catch (IllegalArgumentException e) {
+		String t = raw.trim();
+		if (t.length() > MAX_CLASSIFICATION_LEN) {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-					"Clasificación inválida. Valores: COMISION, TRANSFERENCIA, DEPOSITO_TRANSITO, ERROR, OTRO o vacío.");
+					"La clasificación supera los " + MAX_CLASSIFICATION_LEN + " caracteres.");
 		}
+		return t;
 	}
 
 	private SessionHeaderDto toHeader(ReconciliationSession s) {
@@ -499,17 +569,33 @@ public class ConciliacionSessionService {
 				2, RoundingMode.HALF_UP);
 	}
 
+	private static String classificationDisplayForBank(BankTransaction t,
+			Map<Long, String> classificationByMatchedTxId) {
+		if (classificationByMatchedTxId.containsKey(t.getId())) {
+			return classificationByMatchedTxId.get(t.getId());
+		}
+		return t.getPendingClassification();
+	}
+
+	private static String classificationDisplayForCompany(CompanyTransaction t,
+			Map<Long, String> classificationByMatchedTxId) {
+		if (classificationByMatchedTxId.containsKey(t.getId())) {
+			return classificationByMatchedTxId.get(t.getId());
+		}
+		return t.getPendingClassification();
+	}
+
 	private MovimientoDto toBankMov(BankTransaction t, boolean duplicateInFile, Long fuzzyCounterpartId,
-			String fuzzyHint, long commentCount, long attachmentCount) {
+			String fuzzyHint, long commentCount, long attachmentCount, String pendingClassification) {
 		return new MovimientoDto(t.getId(), t.getTxDate(), t.getAmount(), t.getDescription(), t.getReference(),
-				classificationLabel(t.getPendingClassification()), null, duplicateInFile, fuzzyCounterpartId, fuzzyHint,
+				pendingClassification, null, duplicateInFile, fuzzyCounterpartId, fuzzyHint,
 				commentCount, attachmentCount);
 	}
 
 	private MovimientoDto toCompanyMov(CompanyTransaction t, boolean duplicateInFile, Long fuzzyCounterpartId,
-			String fuzzyHint, long commentCount, long attachmentCount) {
+			String fuzzyHint, long commentCount, long attachmentCount, String pendingClassification) {
 		return new MovimientoDto(t.getId(), t.getTxDate(), t.getAmount(), t.getDescription(), t.getReference(),
-				classificationLabel(t.getPendingClassification()), t.getAccountingAmount(), duplicateInFile,
+				pendingClassification, t.getAccountingAmount(), duplicateInFile,
 				fuzzyCounterpartId, fuzzyHint, commentCount, attachmentCount);
 	}
 
@@ -542,6 +628,16 @@ public class ConciliacionSessionService {
 	private Map<Long, Long> pairAttachmentCountMap(long sessionId) {
 		Map<Long, Long> m = new HashMap<>();
 		for (Object[] row : pairAttachmentRepository.countByPairGrouped(sessionId)) {
+			long pairId = ((Number) row[0]).longValue();
+			long cnt = ((Number) row[1]).longValue();
+			m.put(pairId, cnt);
+		}
+		return m;
+	}
+
+	private Map<Long, Long> pairCommentCountMap(long sessionId) {
+		Map<Long, Long> m = new HashMap<>();
+		for (Object[] row : reconciliationPairCommentRepository.countByPairGrouped(sessionId)) {
 			long pairId = ((Number) row[0]).longValue();
 			long cnt = ((Number) row[1]).longValue();
 			m.put(pairId, cnt);
@@ -632,16 +728,13 @@ public class ConciliacionSessionService {
 		return companyToBank;
 	}
 
-	private static String classificationLabel(PendingClassification c) {
-		return c == null ? null : c.name();
-	}
-
-	private ParDto toPar(ReconciliationPair p, BigDecimal amountGapThreshold, long pairAttachmentCount) {
+	private ParDto toPar(ReconciliationPair p, BigDecimal amountGapThreshold, long pairAttachmentCount,
+			long pairCommentCount) {
 		BankTransaction b = p.getBankTransaction();
 		CompanyTransaction c = p.getCompanyTransaction();
 		return new ParDto(p.getId(), p.getMatchSource().name(), b.getId(), c.getId(), b.getAmount(), c.getAmount(),
 				b.getTxDate(), c.getTxDate(), pairKind(b.getAmount(), c.getAmount(), amountGapThreshold),
-				pairAttachmentCount);
+				pairAttachmentCount, p.getClassification(), pairCommentCount);
 	}
 
 	private static String pairKind(BigDecimal bankAmount, BigDecimal companyAmount, BigDecimal amountGapThreshold) {

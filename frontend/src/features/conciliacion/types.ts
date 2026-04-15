@@ -56,7 +56,7 @@ export type MovementAttachmentDto = {
 /** Comentarios: un movimiento o conversación banco + empresa en un par. */
 export type PendingThreadTarget =
   | { kind: 'single'; side: 'bank' | 'company'; txId: number }
-  | { kind: 'pair'; bankTxId: number; companyTxId: number }
+  | { kind: 'pair'; pairId: number }
 
 /** Adjuntos: pendiente por movimiento, o un solo conjunto por par conciliado. */
 export type PendingAttachmentTarget =
@@ -85,6 +85,10 @@ export type ParDto = {
   companyAmount: number
   bankDate: string
   companyDate: string
+  /** Una sola clasificación por fila de par (persistida en el par, no duplicada en movimientos). */
+  classification?: string | null
+  /** Comentarios del par (un solo hilo por fila conciliada). */
+  pairCommentCount?: number
   /** Derivado: brecha de importe o signo opuesto en el par. */
   pairKind?: PairKind
   /** Comprobantes asociados a la operación (par), no por movimiento. */

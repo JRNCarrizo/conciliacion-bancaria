@@ -1208,18 +1208,41 @@ html[data-theme='dark'] .session-status-pill--imported {
   color: var(--text-h);
 }
 
-.clasif-select {
-  max-width: 12rem;
+.clasif-input {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 14rem;
+  min-width: 7rem;
   font-size: 0.8rem;
   padding: 0.25rem 0.35rem;
   border-radius: 6px;
   border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
 }
 
-.clasif-select:disabled {
+/* Quita la flecha del `datalist` (Chromium / Safari); las sugerencias siguen al escribir. */
+.clasif-input::-webkit-list-button {
+  display: none;
+  width: 0;
+  height: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.compare-td-clasif-pair {
+  vertical-align: middle;
+  min-width: 10rem;
+}
+
+.clasif-input:disabled {
   opacity: 0.85;
   cursor: not-allowed;
   background: color-mix(in srgb, var(--code-bg) 90%, var(--bg));
+}
+
+.clasif-input::placeholder {
+  color: color-mix(in srgb, var(--text-muted) 85%, var(--text));
 }
 
 .data-table .mov-clasif-th {
@@ -1324,11 +1347,24 @@ html[data-theme='dark'] .exec-num--warn {
 
 .compare-filters-bar__search {
   display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.45rem;
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+
+.compare-filters-search-split {
+  display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
   gap: 0.65rem 1rem;
-  flex: 1 1 16rem;
-  min-width: 0;
+  width: 100%;
+}
+
+.compare-filters-search-half {
+  flex: 1 1 calc(50% - 0.5rem);
+  min-width: min(100%, 12rem);
 }
 
 .compare-filters-bar__dates {
@@ -1410,9 +1446,41 @@ html[data-theme='dark'] .exec-num--warn {
   min-width: 0;
 }
 
+.compare-search-controls--half {
+  flex: 1 1 auto;
+  max-width: 100%;
+}
+
+.compare-classif-filter-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  width: 100%;
+  font-size: 0.78rem;
+  color: var(--text-h);
+}
+
+.compare-classif-filter-caption {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-h);
+}
+
+.compare-classif-filter-select {
+  box-sizing: border-box;
+  width: 100%;
+  font: inherit;
+  font-size: 0.88rem;
+  padding: 0.35rem 0.6rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text-h);
+}
+
 .compare-search-input {
-  flex: 1 1 12rem;
-  min-width: 10rem;
+  flex: 1 1 6rem;
+  min-width: 0;
   max-width: 100%;
   box-sizing: border-box;
   font: inherit;

@@ -77,6 +77,20 @@ function textHaystackForRow(row: ComparisonRow): string {
  * Coincide con ID exacto (movimiento o par), importe (misma lógica que saldos) o texto en ref/desc/importe formateado.
  * Vacío = no filtra.
  */
+function normClassification(s: string | null | undefined): string {
+  return (s ?? '').trim()
+}
+
+/** Filtro por clasificación exacta (tras trim). Vacío = no filtra. */
+export function rowMatchesClassification(row: ComparisonRow, raw: string): boolean {
+  const sel = raw.trim()
+  if (sel === '') return true
+  if (row.kind === 'pair') {
+    return normClassification(row.pair.classification) === sel
+  }
+  return normClassification(row.m.pendingClassification) === sel
+}
+
 export function rowMatchesSearch(row: ComparisonRow, rawQuery: string): boolean {
   const q = rawQuery.trim()
   if (q === '') return true
