@@ -490,6 +490,37 @@ html[data-theme='dark'] .import-form-files .import-file-input::-webkit-file-uplo
   margin-top: 0.5rem;
 }
 
+/* Tablas largas: scroll vertical dentro del contenedor (no en toda la página). */
+.table-wrap--scrollY {
+  overflow-y: auto;
+  /* Más alto: aprox. 15 filas en pantallas típicas */
+  max-height: clamp(720px, 82vh, 1240px);
+  border-radius: 10px;
+  box-sizing: border-box;
+}
+
+/* Mismo ancho que el contenido de la tarjeta: sin “márgenes” laterales respecto al .card */
+.card .table-wrap--scrollY {
+  margin-left: -1.5rem;
+  margin-right: -1.5rem;
+  width: calc(100% + 3rem);
+  max-width: none;
+}
+
+.table-wrap--scrollY .data-table th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.table-wrap--scrollY .data-table.compare-table thead tr:first-child th {
+  top: 0;
+}
+
+.table-wrap--scrollY .data-table.compare-table thead tr:nth-child(2) th {
+  top: 2.05rem; /* altura aproximada de la primera fila de encabezados */
+}
+
 .data-table {
   width: 100%;
   border-collapse: collapse;

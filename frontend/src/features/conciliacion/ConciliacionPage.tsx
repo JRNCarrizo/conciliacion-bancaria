@@ -2010,7 +2010,7 @@ function ComparisonTable({
   onOpenPendingAttachments?: (target: PendingAttachmentTarget) => void
 }) {
   return (
-    <div className="table-wrap compare-table-wrap">
+    <div className="table-wrap compare-table-wrap table-wrap--scrollY">
       <table className="data-table compare-table">
         <thead>
           <tr>
@@ -2327,7 +2327,7 @@ function MovimientosTable({
       <h3 className="subsection-title">
         {title} ({rows.length})
       </h3>
-      <div className="table-wrap">
+      <div className="table-wrap table-wrap--scrollY">
         <table className="data-table">
           <thead>
             <tr>
@@ -3454,7 +3454,7 @@ export default function ConciliacionPage() {
                       fechas).
                     </p>
                   ) : (
-                    <div className="table-wrap">
+                    <div className="table-wrap table-wrap--scrollY">
                       <table className="data-table">
                         <thead>
                           <tr>
