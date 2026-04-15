@@ -39,6 +39,9 @@ public class ConciliacionManualPairService {
 	public ManualPairResponseDto createManualPair(long sessionId, long bankTransactionId, long companyTransactionId) {
 		ReconciliationSession session = sessionRepository.findById(sessionId)
 				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sesión no encontrada"));
+		if (session.getStatus() == SessionStatus.CLOSED) {
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "La sesión está cerrada; no se pueden crear pares.");
+		}
 
 		BankTransaction bank = bankTransactionRepository.findByIdAndSession_Id(bankTransactionId, sessionId)
 				.orElseThrow(() -> new IllegalArgumentException("Movimiento de banco no pertenece a esta sesión."));
@@ -67,6 +70,11 @@ public class ConciliacionManualPairService {
 
 	@Transactional
 	public void deleteManualPair(long sessionId, long pairId) {
+		ReconciliationSession session = sessionRepository.findById(sessionId)
+				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sesión no encontrada"));
+		if (session.getStatus() == SessionStatus.CLOSED) {
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "La sesión está cerrada; no se pueden quitar pares.");
+		}
 		ReconciliationPair p = reconciliationPairRepository.findByIdAndSession_Id(pairId, sessionId)
 				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Par no encontrado."));
 		if (p.getMatchSource() != MatchSource.MANUAL) {

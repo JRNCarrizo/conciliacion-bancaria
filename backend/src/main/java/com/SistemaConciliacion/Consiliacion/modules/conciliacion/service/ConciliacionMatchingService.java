@@ -58,6 +58,9 @@ public class ConciliacionMatchingService {
 
 		ReconciliationSession session = sessionRepository.findById(sessionId)
 				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sesión no encontrada"));
+		if (session.getStatus() == SessionStatus.CLOSED) {
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "La sesión está cerrada; no se puede conciliar.");
+		}
 
 		reconciliationPairRepository.deleteBySession_IdAndMatchSource(sessionId, MatchSource.AUTO);
 
@@ -117,6 +120,8 @@ public class ConciliacionMatchingService {
 
 		reconciliationPairRepository.saveAll(newAutoPairs);
 		session.setStatus(SessionStatus.RECONCILED);
+		session.setAmountTolerance(tol);
+		session.setDateToleranceDays(dateToleranceDays);
 		sessionRepository.save(session);
 
 		int autoCreated = newAutoPairs.size();

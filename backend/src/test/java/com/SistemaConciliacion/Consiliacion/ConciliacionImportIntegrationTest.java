@@ -77,6 +77,33 @@ class ConciliacionImportIntegrationTest {
 		mockMvc.perform(get("/api/v1/conciliacion/sessions/{id}", sessionId))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.session.closingBankBalance").value(27000000.00))
-				.andExpect(jsonPath("$.session.openingBankBalance").value(1000.50));
+				.andExpect(jsonPath("$.session.openingBankBalance").value(1000.50))
+				.andExpect(jsonPath("$.session.amountTolerance").value(0.01))
+				.andExpect(jsonPath("$.session.dateToleranceDays").value(5));
+	}
+
+	@Test
+	void conciliarWithZeroAmountToleranceIsSavedAndReturned() throws Exception {
+		byte[] bankBytes = new ClassPathResource("fixtures/Octubre-Banco.xls").getInputStream().readAllBytes();
+		byte[] companyBytes = new ClassPathResource("fixtures/Octubre-Plataforma.xlsx").getInputStream()
+				.readAllBytes();
+
+		MockMultipartFile bank = new MockMultipartFile("bank", "Octubre-Banco.xls", "application/vnd.ms-excel",
+				bankBytes);
+		MockMultipartFile company = new MockMultipartFile("company", "Octubre-Plataforma.xlsx",
+				"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", companyBytes);
+
+		String body = mockMvc.perform(multipart("/api/v1/conciliacion/import").file(bank).file(company))
+				.andExpect(status().isOk())
+				.andReturn().getResponse().getContentAsString();
+
+		long sessionId = new ObjectMapper().readTree(body).get("sessionId").asLong();
+
+		mockMvc.perform(post("/api/v1/conciliacion/sessions/{id}/conciliar", sessionId).param("dateToleranceDays", "0")
+				.param("amountTolerance", "0"))
+				.andExpect(status().isOk());
+
+		mockMvc.perform(get("/api/v1/conciliacion/sessions/{id}", sessionId)).andExpect(status().isOk())
+				.andExpect(jsonPath("$.session.amountTolerance").value(0));
 	}
 }

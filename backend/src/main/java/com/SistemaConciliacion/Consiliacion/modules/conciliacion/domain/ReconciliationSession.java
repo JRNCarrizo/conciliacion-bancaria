@@ -46,6 +46,13 @@ public class ReconciliationSession {
 	@Column(name = "closing_company_balance", precision = 19, scale = 4)
 	private BigDecimal closingCompanyBalance;
 
+	/** Última tolerancia de importe usada en conciliar automático (clasificación de brechas en UI). */
+	@Column(name = "amount_tolerance", precision = 19, scale = 4)
+	private BigDecimal amountTolerance;
+
+	@Column(name = "date_tolerance_days")
+	private Integer dateToleranceDays;
+
 	@PrePersist
 	void prePersist() {
 		if (createdAt == null) {
@@ -123,5 +130,21 @@ public class ReconciliationSession {
 
 	public void setClosingCompanyBalance(BigDecimal closingCompanyBalance) {
 		this.closingCompanyBalance = closingCompanyBalance;
+	}
+
+	public BigDecimal getAmountTolerance() {
+		return amountTolerance;
+	}
+
+	public void setAmountTolerance(BigDecimal amountTolerance) {
+		this.amountTolerance = amountTolerance;
+	}
+
+	public Integer getDateToleranceDays() {
+		return dateToleranceDays;
+	}
+
+	public void setDateToleranceDays(Integer dateToleranceDays) {
+		this.dateToleranceDays = dateToleranceDays;
 	}
 }

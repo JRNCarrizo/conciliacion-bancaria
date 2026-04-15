@@ -13,4 +13,14 @@ export default defineConfig({
       },
     },
   },
+  /** Mismo proxy que en dev: `vite preview` y pruebas del build necesitan llegar al backend en :8080 */
+  preview: {
+    port: 4173,
+    proxy: {
+      '/api': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+      },
+    },
+  },
 })

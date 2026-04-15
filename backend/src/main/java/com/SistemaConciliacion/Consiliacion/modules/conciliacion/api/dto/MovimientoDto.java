@@ -8,5 +8,6 @@ import java.time.LocalDate;
  * (contable). En banco {@code accountingAmount} es siempre null.
  */
 public record MovimientoDto(long id, LocalDate txDate, BigDecimal amount, String description, String reference,
-		String pendingClassification, BigDecimal accountingAmount) {
+		String pendingClassification, BigDecimal accountingAmount, boolean duplicateInFile, Long fuzzyCounterpartId,
+		String fuzzyHint, long commentCount, long attachmentCount) {
 }

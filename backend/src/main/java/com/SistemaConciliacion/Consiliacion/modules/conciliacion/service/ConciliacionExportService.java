@@ -5,7 +5,13 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -20,6 +26,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.ConciliacionStatsDto;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.MovimientoDto;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.ParDto;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.SessionDetailDto;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.SessionHeaderDto;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.BankTransaction;
@@ -74,20 +81,29 @@ public class ConciliacionExportService {
 	}
 
 	/**
-	 * Libro Excel con hojas Resumen (totales y KPIs), Pares y Pendientes.
+	 * Libro Excel multipágina: Resumen (KPIs como en pantalla), Conciliados (pares), Pendientes banco,
+	 * Pendientes empresa, Detalle completo (todos los movimientos con estado).
 	 */
 	@Transactional(readOnly = true)
 	public byte[] exportExcel(long sessionId) {
 		SessionDetailDto d = conciliacionSessionService.getSessionDetail(sessionId);
 		try (XSSFWorkbook wb = new XSSFWorkbook(); ByteArrayOutputStream bos = new ByteArrayOutputStream()) {
 			writeResumenSheet(wb, d);
-			writePairsSheet(wb, reconciliationPairRepository.findAllWithPartiesBySessionId(sessionId));
-			writePendingSheetFromDto(wb, d.unmatchedBankTransactions(), d.unmatchedCompanyTransactions());
+			writeConciliadosSheet(wb, d);
+			writePendientesBancoSheet(wb, d.unmatchedBankTransactions());
+			writePendientesEmpresaSheet(wb, d.unmatchedCompanyTransactions());
+			writeDetalleCompletoSheet(wb, d);
 			wb.write(bos);
 			return bos.toByteArray();
 		} catch (IOException e) {
 			throw new UncheckedIOException(e);
 		}
+	}
+
+	private static final DateTimeFormatter EXP_FECHA = DateTimeFormatter.ofPattern("dd/MM/yyyy");
+
+	private static String fmtFecha(LocalDate d) {
+		return d == null ? "" : d.format(EXP_FECHA);
 	}
 
 	private static void writeResumenSheet(XSSFWorkbook wb, SessionDetailDto d) {
@@ -99,7 +115,7 @@ public class ConciliacionExportService {
 		row0.createCell(0).setCellValue("Conciliación bancaria — sesión " + h.id());
 		r++;
 		addKv(sh, r++, "Creada", String.valueOf(h.createdAt()));
-		addKv(sh, r++, "Estado", h.status());
+		addKv(sh, r++, "Estado de la sesión", sessionStatusEs(h.status()));
 		addKv(sh, r++, "Archivo banco", nullToDash(h.sourceBankFileName()));
 		addKv(sh, r++, "Archivo empresa", nullToDash(h.sourceCompanyFileName()));
 		r++;
@@ -167,78 +183,224 @@ public class ConciliacionExportService {
 		return s == null || s.isBlank() ? "—" : s;
 	}
 
-	private static void writePairsSheet(XSSFWorkbook wb, List<ReconciliationPair> pairs) {
-		Sheet sh = wb.createSheet("Pares");
-		String[] headers = { "tipo_match", "id_par", "id_banco", "fecha_banco", "importe_banco", "ref_banco",
-				"desc_banco", "id_empresa", "fecha_empresa", "importe_empresa_conciliacion", "neto_contable_haber_menos_debe",
-				"ref_empresa", "desc_empresa" };
+	private static String sessionStatusEs(String status) {
+		if (status == null || status.isBlank()) {
+			return "—";
+		}
+		return switch (status) {
+			case "IMPORTED" -> "Importada";
+			case "RECONCILED" -> "Conciliada";
+			case "CLOSED" -> "Cerrada";
+			default -> status;
+		};
+	}
+
+	private static Map<Long, MovimientoDto> indexById(List<MovimientoDto> list) {
+		return list.stream().collect(Collectors.toMap(MovimientoDto::id, m -> m, (a, b) -> a));
+	}
+
+	private static void writeConciliadosSheet(XSSFWorkbook wb, SessionDetailDto d) {
+		Sheet sh = wb.createSheet("Conciliados");
+		String[] headers = { "Fecha banco", "Fecha empresa", "ID par", "ID banco", "ID empresa", "Ref. banco",
+				"Descripción banco", "Ref. empresa", "Descripción empresa", "Importe banco", "Importe empresa",
+				"Neto contable (empresa)", "Estado del par", "Match" };
 		Row h = sh.createRow(0);
 		for (int i = 0; i < headers.length; i++) {
 			h.createCell(i).setCellValue(headers[i]);
 		}
+		Map<Long, MovimientoDto> bankMap = indexById(d.bankTransactions());
+		Map<Long, MovimientoDto> compMap = indexById(d.companyTransactions());
+		List<ParDto> pairs = new ArrayList<>(d.pairs());
+		pairs.sort(Comparator.comparing(ParDto::bankDate).thenComparing(ParDto::pairId));
 		int r = 1;
-		for (ReconciliationPair p : pairs) {
-			BankTransaction b = p.getBankTransaction();
-			CompanyTransaction c = p.getCompanyTransaction();
+		for (ParDto p : pairs) {
+			MovimientoDto b = bankMap.get(p.bankTxId());
+			MovimientoDto c = compMap.get(p.companyTxId());
+			if (b == null || c == null) {
+				continue;
+			}
 			Row row = sh.createRow(r++);
 			int col = 0;
-			row.createCell(col++).setCellValue(p.getMatchSource().name());
-			row.createCell(col++).setCellValue(p.getId());
-			row.createCell(col++).setCellValue(b.getId());
-			row.createCell(col++).setCellValue(b.getTxDate().toString());
-			row.createCell(col++).setCellValue(b.getAmount().doubleValue());
-			row.createCell(col++).setCellValue(b.getReference() == null ? "" : b.getReference());
-			row.createCell(col++).setCellValue(b.getDescription() == null ? "" : b.getDescription());
-			row.createCell(col++).setCellValue(c.getId());
-			row.createCell(col++).setCellValue(c.getTxDate().toString());
-			row.createCell(col++).setCellValue(c.getAmount().doubleValue());
-			BigDecimal acc = c.getAccountingAmount();
-			row.createCell(col++).setCellValue(acc != null ? acc.doubleValue() : c.getAmount().negate().doubleValue());
-			row.createCell(col++).setCellValue(c.getReference() == null ? "" : c.getReference());
-			row.createCell(col++).setCellValue(c.getDescription() == null ? "" : c.getDescription());
+			row.createCell(col++).setCellValue(fmtFecha(b.txDate()));
+			row.createCell(col++).setCellValue(fmtFecha(c.txDate()));
+			row.createCell(col++).setCellValue(p.pairId());
+			row.createCell(col++).setCellValue(b.id());
+			row.createCell(col++).setCellValue(c.id());
+			row.createCell(col++).setCellValue(emptyToBlank(b.reference()));
+			row.createCell(col++).setCellValue(emptyToBlank(b.description()));
+			row.createCell(col++).setCellValue(emptyToBlank(c.reference()));
+			row.createCell(col++).setCellValue(emptyToBlank(c.description()));
+			row.createCell(col++).setCellValue(b.amount().doubleValue());
+			row.createCell(col++).setCellValue(c.amount().doubleValue());
+			BigDecimal acc = c.accountingAmount();
+			BigDecimal neto = acc != null ? acc : c.amount().negate();
+			row.createCell(col++).setCellValue(neto.doubleValue());
+			row.createCell(col++).setCellValue(pairKindLabelEs(p.pairKind()));
+			row.createCell(col++).setCellValue(matchSourceLabel(p.matchSource()));
 		}
 		for (int i = 0; i < headers.length; i++) {
 			sh.autoSizeColumn(i);
 		}
 	}
 
-	private static void writePendingSheetFromDto(XSSFWorkbook wb, List<MovimientoDto> bank, List<MovimientoDto> comp) {
-		Sheet sh = wb.createSheet("Pendientes");
-		String[] headers = { "lado", "id", "fecha", "importe_conciliacion", "neto_contable_haber_menos_debe",
-				"referencia", "descripcion", "clasificacion" };
+	private static String emptyToBlank(String s) {
+		return s == null || s.isBlank() ? "" : s;
+	}
+
+	private static String pairKindLabelEs(String pairKind) {
+		if (pairKind == null || pairKind.isBlank()) {
+			return "";
+		}
+		return switch (pairKind) {
+			case "EXACT" -> "Coincidente";
+			case "AMOUNT_GAP" -> "Brecha de importe";
+			case "OPPOSITE_SIGN" -> "Signo opuesto";
+			default -> pairKind;
+		};
+	}
+
+	private static String matchSourceLabel(String matchSource) {
+		if (matchSource == null) {
+			return "";
+		}
+		return switch (matchSource) {
+			case "MANUAL" -> "Manual";
+			case "AUTO" -> "Automático";
+			default -> matchSource;
+		};
+	}
+
+	private static void writePendientesBancoSheet(XSSFWorkbook wb, List<MovimientoDto> bank) {
+		Sheet sh = wb.createSheet("Pendientes banco");
+		String[] headers = { "ID", "Fecha", "Importe", "Referencia", "Descripción", "Clasificación", "Duplicado",
+				"Match sugerido (ID)", "Match sugerido (texto)", "Nº comentarios" };
 		Row h = sh.createRow(0);
 		for (int i = 0; i < headers.length; i++) {
 			h.createCell(i).setCellValue(headers[i]);
 		}
+		List<MovimientoDto> rows = new ArrayList<>(bank);
+		rows.sort(Comparator.comparing(MovimientoDto::txDate).thenComparing(MovimientoDto::id));
 		int r = 1;
-		for (MovimientoDto m : bank) {
-			r = writeMovRow(sh, r, "BANCO", m);
-		}
-		for (MovimientoDto m : comp) {
-			r = writeMovRow(sh, r, "EMPRESA", m);
+		for (MovimientoDto m : rows) {
+			writePendienteBancoRow(sh.createRow(r++), m);
 		}
 		for (int i = 0; i < headers.length; i++) {
 			sh.autoSizeColumn(i);
 		}
 	}
 
-	private static int writeMovRow(Sheet sh, int r, String lado, MovimientoDto m) {
-		Row row = sh.createRow(r);
-		row.createCell(0).setCellValue(lado);
-		row.createCell(1).setCellValue(m.id());
-		row.createCell(2).setCellValue(m.txDate().toString());
-		row.createCell(3).setCellValue(m.amount().doubleValue());
-		BigDecimal acc = m.accountingAmount();
-		if ("BANCO".equals(lado)) {
-			row.createCell(4).setCellValue("");
-		} else {
-			BigDecimal neto = acc != null ? acc : m.amount().negate();
-			row.createCell(4).setCellValue(neto.doubleValue());
+	private static void writePendienteBancoRow(Row row, MovimientoDto m) {
+		int col = 0;
+		row.createCell(col++).setCellValue(m.id());
+		row.createCell(col++).setCellValue(fmtFecha(m.txDate()));
+		row.createCell(col++).setCellValue(m.amount().doubleValue());
+		row.createCell(col++).setCellValue(emptyToBlank(m.reference()));
+		row.createCell(col++).setCellValue(emptyToBlank(m.description()));
+		row.createCell(col++).setCellValue(emptyToBlank(m.pendingClassification()));
+		row.createCell(col++).setCellValue(m.duplicateInFile() ? "Sí" : "No");
+		row.createCell(col++).setCellValue(m.fuzzyCounterpartId() == null ? "" : String.valueOf(m.fuzzyCounterpartId()));
+		row.createCell(col++).setCellValue(emptyToBlank(m.fuzzyHint()));
+		row.createCell(col++).setCellValue(m.commentCount());
+	}
+
+	private static void writePendientesEmpresaSheet(XSSFWorkbook wb, List<MovimientoDto> comp) {
+		Sheet sh = wb.createSheet("Pendientes empresa");
+		String[] headers = { "ID", "Fecha", "Importe (conciliación)", "Neto contable", "Referencia", "Descripción",
+				"Clasificación", "Duplicado", "Match sugerido (ID)", "Match sugerido (texto)", "Nº comentarios" };
+		Row h = sh.createRow(0);
+		for (int i = 0; i < headers.length; i++) {
+			h.createCell(i).setCellValue(headers[i]);
 		}
-		row.createCell(5).setCellValue(m.reference() == null ? "" : m.reference());
-		row.createCell(6).setCellValue(m.description() == null ? "" : m.description());
-		row.createCell(7).setCellValue(m.pendingClassification() == null ? "" : m.pendingClassification());
-		return r + 1;
+		List<MovimientoDto> rows = new ArrayList<>(comp);
+		rows.sort(Comparator.comparing(MovimientoDto::txDate).thenComparing(MovimientoDto::id));
+		int r = 1;
+		for (MovimientoDto m : rows) {
+			writePendienteEmpresaRow(sh.createRow(r++), m);
+		}
+		for (int i = 0; i < headers.length; i++) {
+			sh.autoSizeColumn(i);
+		}
+	}
+
+	private static void writePendienteEmpresaRow(Row row, MovimientoDto m) {
+		int col = 0;
+		row.createCell(col++).setCellValue(m.id());
+		row.createCell(col++).setCellValue(fmtFecha(m.txDate()));
+		row.createCell(col++).setCellValue(m.amount().doubleValue());
+		BigDecimal acc = m.accountingAmount();
+		BigDecimal neto = acc != null ? acc : m.amount().negate();
+		row.createCell(col++).setCellValue(neto.doubleValue());
+		row.createCell(col++).setCellValue(emptyToBlank(m.reference()));
+		row.createCell(col++).setCellValue(emptyToBlank(m.description()));
+		row.createCell(col++).setCellValue(emptyToBlank(m.pendingClassification()));
+		row.createCell(col++).setCellValue(m.duplicateInFile() ? "Sí" : "No");
+		row.createCell(col++).setCellValue(m.fuzzyCounterpartId() == null ? "" : String.valueOf(m.fuzzyCounterpartId()));
+		row.createCell(col++).setCellValue(emptyToBlank(m.fuzzyHint()));
+		row.createCell(col++).setCellValue(m.commentCount());
+	}
+
+	private record ExportDetLine(MovimientoDto mov, boolean bankSide) {
+	}
+
+	private static void writeDetalleCompletoSheet(XSSFWorkbook wb, SessionDetailDto d) {
+		Sheet sh = wb.createSheet("Detalle completo");
+		String[] headers = { "ID", "Fecha", "Origen", "Referencia", "Descripción", "Importe (conciliación)",
+				"Neto contable", "Estado", "ID par", "Match", "Nº comentarios" };
+		Row h = sh.createRow(0);
+		for (int i = 0; i < headers.length; i++) {
+			h.createCell(i).setCellValue(headers[i]);
+		}
+		Map<Long, Long> bankToPair = new HashMap<>();
+		Map<Long, Long> companyToPair = new HashMap<>();
+		Map<Long, String> pairMatch = new HashMap<>();
+		for (ParDto p : d.pairs()) {
+			bankToPair.put(p.bankTxId(), p.pairId());
+			companyToPair.put(p.companyTxId(), p.pairId());
+			pairMatch.put(p.pairId(), p.matchSource());
+		}
+		List<ExportDetLine> lines = new ArrayList<>();
+		for (MovimientoDto m : d.bankTransactions()) {
+			lines.add(new ExportDetLine(m, true));
+		}
+		for (MovimientoDto m : d.companyTransactions()) {
+			lines.add(new ExportDetLine(m, false));
+		}
+		lines.sort(Comparator.comparing((ExportDetLine x) -> x.mov().txDate()).thenComparing(x -> x.bankSide() ? 0 : 1)
+				.thenComparing(x -> x.mov().id()));
+		int r = 1;
+		for (ExportDetLine line : lines) {
+			MovimientoDto m = line.mov();
+			boolean bank = line.bankSide();
+			Row row = sh.createRow(r++);
+			int col = 0;
+			row.createCell(col++).setCellValue(m.id());
+			row.createCell(col++).setCellValue(fmtFecha(m.txDate()));
+			row.createCell(col++).setCellValue(bank ? "Banco" : "Empresa");
+			row.createCell(col++).setCellValue(emptyToBlank(m.reference()));
+			row.createCell(col++).setCellValue(emptyToBlank(m.description()));
+			row.createCell(col++).setCellValue(m.amount().doubleValue());
+			if (bank) {
+				row.createCell(col++).setCellValue("");
+			} else {
+				BigDecimal acc = m.accountingAmount();
+				BigDecimal neto = acc != null ? acc : m.amount().negate();
+				row.createCell(col++).setCellValue(neto.doubleValue());
+			}
+			Long pairId = bank ? bankToPair.get(m.id()) : companyToPair.get(m.id());
+			if (pairId != null) {
+				row.createCell(col++).setCellValue("Conciliado");
+				row.createCell(col++).setCellValue(pairId);
+				row.createCell(col++).setCellValue(matchSourceLabel(pairMatch.get(pairId)));
+			} else {
+				row.createCell(col++).setCellValue(bank ? "Pendiente banco" : "Pendiente empresa");
+				row.createCell(col++).setCellValue("");
+				row.createCell(col++).setCellValue("");
+			}
+			row.createCell(col++).setCellValue(m.commentCount());
+		}
+		for (int i = 0; i < headers.length; i++) {
+			sh.autoSizeColumn(i);
+		}
 	}
 
 	private String buildPairsCsv(long sessionId) {

@@ -2,9 +2,13 @@ package com.SistemaConciliacion.Consiliacion.modules.conciliacion.service;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import org.springframework.data.domain.Page;
@@ -15,8 +19,10 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.ClassificationUpdateDto;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.CommentCreateDto;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.ConciliacionStatsDto;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.MovimientoDto;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.PendingCommentDto;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.ParDto;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.SessionBalancesDto;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.SessionDetailDto;
@@ -25,10 +31,16 @@ import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.Session
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.BankTransaction;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.CompanyTransaction;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.PendingClassification;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.PendingMovementComment;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.PendingMovementSide;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.ReconciliationPair;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.ReconciliationSession;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.SessionStatus;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.repository.BankTransactionRepository;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.repository.CompanyTransactionRepository;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.repository.MovementAttachmentRepository;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.repository.PairAttachmentRepository;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.repository.PendingMovementCommentRepository;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.repository.ReconciliationPairRepository;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.repository.ReconciliationSessionRepository;
 
@@ -41,15 +53,24 @@ public class ConciliacionSessionService {
 	private final BankTransactionRepository bankTransactionRepository;
 	private final CompanyTransactionRepository companyTransactionRepository;
 	private final ReconciliationPairRepository reconciliationPairRepository;
+	private final PendingMovementCommentRepository pendingMovementCommentRepository;
+	private final MovementAttachmentRepository movementAttachmentRepository;
+	private final PairAttachmentRepository pairAttachmentRepository;
 
 	public ConciliacionSessionService(ReconciliationSessionRepository sessionRepository,
 			BankTransactionRepository bankTransactionRepository,
 			CompanyTransactionRepository companyTransactionRepository,
-			ReconciliationPairRepository reconciliationPairRepository) {
+			ReconciliationPairRepository reconciliationPairRepository,
+			PendingMovementCommentRepository pendingMovementCommentRepository,
+			MovementAttachmentRepository movementAttachmentRepository,
+			PairAttachmentRepository pairAttachmentRepository) {
 		this.sessionRepository = sessionRepository;
 		this.bankTransactionRepository = bankTransactionRepository;
 		this.companyTransactionRepository = companyTransactionRepository;
 		this.reconciliationPairRepository = reconciliationPairRepository;
+		this.pendingMovementCommentRepository = pendingMovementCommentRepository;
+		this.movementAttachmentRepository = movementAttachmentRepository;
+		this.pairAttachmentRepository = pairAttachmentRepository;
 	}
 
 	@Transactional(readOnly = true)
@@ -82,24 +103,81 @@ public class ConciliacionSessionService {
 			matchedCompanyIds.add(p.getCompanyTransaction().getId());
 		}
 
-		List<MovimientoDto> bankDtos = banks.stream().map(this::toBankMov).toList();
-		List<MovimientoDto> companyDtos = companies.stream().map(this::toCompanyMov).toList();
-		List<MovimientoDto> unmatchedBank = banks.stream().filter(t -> !matchedBankIds.contains(t.getId()))
-				.map(this::toBankMov).toList();
-		List<MovimientoDto> unmatchedCompany = companies.stream().filter(t -> !matchedCompanyIds.contains(t.getId()))
-				.map(this::toCompanyMov).toList();
-		List<ParDto> parDtos = pairs.stream().map(this::toPar).toList();
+		Set<Long> duplicateBankIds = duplicateIdsBank(banks);
+		Set<Long> duplicateCompanyIds = duplicateIdsCompany(companies);
 
-		ConciliacionStatsDto stats = buildStats(s, banks, companies, pairs, matchedBankIds, matchedCompanyIds);
+		List<BankTransaction> unmatchedBankEntities = banks.stream().filter(t -> !matchedBankIds.contains(t.getId()))
+				.toList();
+		List<CompanyTransaction> unmatchedCompanyEntities = companies.stream()
+				.filter(t -> !matchedCompanyIds.contains(t.getId())).toList();
+
+		Map<Long, Long> fuzzyBankToCompany = computeFuzzyCandidatesBankToCompany(unmatchedBankEntities,
+				unmatchedCompanyEntities);
+		Map<Long, Long> fuzzyCompanyToBank = invertFuzzyMap(fuzzyBankToCompany);
+
+		Map<String, Long> commentCounts = commentCountMap(sessionId);
+		Map<String, Long> attachmentCounts = attachmentCountMap(sessionId);
+		Map<Long, Long> pairAttachmentCounts = pairAttachmentCountMap(sessionId);
+
+		List<MovimientoDto> bankDtos = banks.stream()
+				.map(t -> toBankMov(t, duplicateBankIds.contains(t.getId()), null, null,
+						commentCounts.getOrDefault(commentKey(PendingMovementSide.BANK, t.getId()), 0L),
+						attachmentCounts.getOrDefault(commentKey(PendingMovementSide.BANK, t.getId()), 0L)))
+				.toList();
+		List<MovimientoDto> companyDtos = companies.stream()
+				.map(c -> toCompanyMov(c, duplicateCompanyIds.contains(c.getId()), null, null,
+						commentCounts.getOrDefault(commentKey(PendingMovementSide.COMPANY, c.getId()), 0L),
+						attachmentCounts.getOrDefault(commentKey(PendingMovementSide.COMPANY, c.getId()), 0L)))
+				.toList();
+		List<MovimientoDto> unmatchedBank = unmatchedBankEntities.stream()
+				.map(t -> toBankMov(t, duplicateBankIds.contains(t.getId()), fuzzyBankToCompany.get(t.getId()),
+						fuzzyBankToCompany.containsKey(t.getId())
+								? fuzzyHint("empresa", fuzzyBankToCompany.get(t.getId()))
+								: null,
+						commentCounts.getOrDefault(commentKey(PendingMovementSide.BANK, t.getId()), 0L),
+						attachmentCounts.getOrDefault(commentKey(PendingMovementSide.BANK, t.getId()), 0L)))
+				.toList();
+		List<MovimientoDto> unmatchedCompany = unmatchedCompanyEntities.stream()
+				.map(c -> toCompanyMov(c, duplicateCompanyIds.contains(c.getId()), fuzzyCompanyToBank.get(c.getId()),
+						fuzzyCompanyToBank.containsKey(c.getId())
+								? fuzzyHint("banco", fuzzyCompanyToBank.get(c.getId()))
+								: null,
+						commentCounts.getOrDefault(commentKey(PendingMovementSide.COMPANY, c.getId()), 0L),
+						attachmentCounts.getOrDefault(commentKey(PendingMovementSide.COMPANY, c.getId()), 0L)))
+				.toList();
+		BigDecimal gapThreshold = amountGapClassificationThreshold(s);
+		List<ParDto> parDtos = pairs.stream()
+				.map((ReconciliationPair p) -> toPar(p, gapThreshold,
+						pairAttachmentCounts.getOrDefault(p.getId(), 0L)))
+				.toList();
+
+		ConciliacionStatsDto stats = buildStats(s, banks, companies, pairs, matchedBankIds, matchedCompanyIds,
+				gapThreshold);
 
 		return new SessionDetailDto(toHeader(s), bankDtos, companyDtos, unmatchedBank, unmatchedCompany, parDtos,
 				stats);
 	}
 
 	@Transactional
+	public SessionHeaderDto closeSession(long sessionId) {
+		ReconciliationSession s = sessionRepository.findById(sessionId)
+				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sesión no encontrada"));
+		if (s.getStatus() == SessionStatus.CLOSED) {
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "La sesión ya está cerrada.");
+		}
+		s.setStatus(SessionStatus.CLOSED);
+		sessionRepository.save(s);
+		return toHeader(s);
+	}
+
+	@Transactional
 	public SessionHeaderDto putBalances(long sessionId, SessionBalancesDto dto) {
 		ReconciliationSession s = sessionRepository.findById(sessionId)
 				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sesión no encontrada"));
+		if (s.getStatus() == SessionStatus.CLOSED) {
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+					"La sesión está cerrada; los saldos no se pueden modificar.");
+		}
 		s.setOpeningBankBalance(dto.openingBankBalance());
 		s.setClosingBankBalance(dto.closingBankBalance());
 		s.setOpeningCompanyBalance(dto.openingCompanyBalance());
@@ -110,6 +188,12 @@ public class ConciliacionSessionService {
 
 	@Transactional
 	public void putBankClassification(long sessionId, long bankTxId, ClassificationUpdateDto body) {
+		ReconciliationSession session = sessionRepository.findById(sessionId)
+				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sesión no encontrada"));
+		if (session.getStatus() == SessionStatus.CLOSED) {
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+					"La sesión está cerrada; la clasificación no se puede modificar.");
+		}
 		if (reconciliationPairRepository.existsByBankTransaction_Id(bankTxId)) {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
 					"Solo se clasifican movimientos pendientes (sin par).");
@@ -122,6 +206,12 @@ public class ConciliacionSessionService {
 
 	@Transactional
 	public void putCompanyClassification(long sessionId, long companyTxId, ClassificationUpdateDto body) {
+		ReconciliationSession session = sessionRepository.findById(sessionId)
+				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sesión no encontrada"));
+		if (session.getStatus() == SessionStatus.CLOSED) {
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+					"La sesión está cerrada; la clasificación no se puede modificar.");
+		}
 		if (reconciliationPairRepository.existsByCompanyTransaction_Id(companyTxId)) {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
 					"Solo se clasifican movimientos pendientes (sin par).");
@@ -130,6 +220,48 @@ public class ConciliacionSessionService {
 				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Movimiento no encontrado"));
 		t.setPendingClassification(parseClassification(body != null ? body.classification() : null));
 		companyTransactionRepository.save(t);
+	}
+
+	@Transactional(readOnly = true)
+	public List<PendingCommentDto> listPendingComments(long sessionId, PendingMovementSide side, long txId) {
+		sessionRepository.findById(sessionId)
+				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sesión no encontrada"));
+		return pendingMovementCommentRepository
+				.findBySession_IdAndMovementSideAndMovementIdOrderByCreatedAtAsc(sessionId, side, txId).stream()
+				.map(c -> new PendingCommentDto(c.getId(), c.getBody(), c.getCreatedAt())).toList();
+	}
+
+	@Transactional
+	public PendingCommentDto addPendingComment(long sessionId, PendingMovementSide side, long txId,
+			CommentCreateDto dto) {
+		ReconciliationSession session = sessionRepository.findById(sessionId)
+				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sesión no encontrada"));
+		if (session.getStatus() == SessionStatus.CLOSED) {
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+					"La sesión está cerrada; no se pueden agregar comentarios.");
+		}
+		String text = dto == null || dto.text() == null ? "" : dto.text().trim();
+		if (text.isEmpty()) {
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "El comentario no puede estar vacío.");
+		}
+		if (text.length() > 4000) {
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "El comentario supera los 4000 caracteres.");
+		}
+		if (side == PendingMovementSide.BANK) {
+			bankTransactionRepository.findByIdAndSession_Id(txId, sessionId).orElseThrow(
+					() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Movimiento no encontrado"));
+		} else {
+			companyTransactionRepository.findByIdAndSession_Id(txId, sessionId).orElseThrow(
+					() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Movimiento no encontrado"));
+		}
+		PendingMovementComment c = new PendingMovementComment();
+		c.setSession(session);
+		c.setMovementSide(side);
+		c.setMovementId(txId);
+		c.setBody(text);
+		c.setCreatedAt(Instant.now());
+		pendingMovementCommentRepository.save(c);
+		return new PendingCommentDto(c.getId(), c.getBody(), c.getCreatedAt());
 	}
 
 	private static PendingClassification parseClassification(String raw) {
@@ -147,12 +279,25 @@ public class ConciliacionSessionService {
 	private SessionHeaderDto toHeader(ReconciliationSession s) {
 		return new SessionHeaderDto(s.getId(), s.getCreatedAt(), s.getSourceBankFileName(),
 				s.getSourceCompanyFileName(), s.getStatus().name(), s.getOpeningBankBalance(), s.getClosingBankBalance(),
-				s.getOpeningCompanyBalance(), s.getClosingCompanyBalance());
+				s.getOpeningCompanyBalance(), s.getClosingCompanyBalance(), s.getAmountTolerance(),
+				s.getDateToleranceDays());
+	}
+
+	/**
+	 * Umbral para EXACT vs AMOUNT_GAP: coincide con la última tolerancia de conciliación automática; si aún no
+	 * hubo conciliación, EPS (0,02) como hasta ahora.
+	 */
+	private BigDecimal amountGapClassificationThreshold(ReconciliationSession s) {
+		BigDecimal t = s.getAmountTolerance();
+		if (t == null) {
+			return EPS;
+		}
+		return t.setScale(4, RoundingMode.HALF_UP);
 	}
 
 	private ConciliacionStatsDto buildStats(ReconciliationSession session, List<BankTransaction> banks,
 			List<CompanyTransaction> companies, List<ReconciliationPair> pairs, Set<Long> matchedBankIds,
-			Set<Long> matchedCompanyIds) {
+			Set<Long> matchedCompanyIds, BigDecimal amountGapThreshold) {
 		long bankRowCount = banks.size();
 		long companyRowCount = companies.size();
 		long matchedPairs = pairs.size();
@@ -186,7 +331,7 @@ public class ConciliacionSessionService {
 			BigDecimal ba = p.getBankTransaction().getAmount();
 			BigDecimal ca = p.getCompanyTransaction().getAmount();
 			BigDecimal gap = ba.subtract(ca).abs();
-			if (gap.compareTo(EPS) <= 0) {
+			if (gap.compareTo(amountGapThreshold) <= 0) {
 				pairsExactAmountCount++;
 			} else {
 				pairsWithAmountGapCount++;
@@ -195,7 +340,10 @@ public class ConciliacionSessionService {
 				pairsOppositeSignCount++;
 			}
 		}
-		boolean pairAmountMismatch = reconciledPairDelta.abs().compareTo(EPS) >= 0;
+		// El Δ neto en pares puede ser ~0 aunque haya brechas que se compensan; el estado del reporte debe
+		// reflejar también «al menos un par con |banco−empresa| por encima del umbral de la sesión».
+		boolean pairAmountMismatch = reconciledPairDelta.abs().compareTo(EPS) >= 0
+				|| pairsWithAmountGapCount > 0;
 		BigDecimal recomposed = reconciledPairDelta.add(pendingNetDifference);
 		boolean differenceDecompositionOk = differenceTotal.subtract(recomposed).abs().compareTo(EPS) < 0;
 
@@ -351,24 +499,159 @@ public class ConciliacionSessionService {
 				2, RoundingMode.HALF_UP);
 	}
 
-	private MovimientoDto toBankMov(BankTransaction t) {
+	private MovimientoDto toBankMov(BankTransaction t, boolean duplicateInFile, Long fuzzyCounterpartId,
+			String fuzzyHint, long commentCount, long attachmentCount) {
 		return new MovimientoDto(t.getId(), t.getTxDate(), t.getAmount(), t.getDescription(), t.getReference(),
-				classificationLabel(t.getPendingClassification()), null);
+				classificationLabel(t.getPendingClassification()), null, duplicateInFile, fuzzyCounterpartId, fuzzyHint,
+				commentCount, attachmentCount);
 	}
 
-	private MovimientoDto toCompanyMov(CompanyTransaction t) {
+	private MovimientoDto toCompanyMov(CompanyTransaction t, boolean duplicateInFile, Long fuzzyCounterpartId,
+			String fuzzyHint, long commentCount, long attachmentCount) {
 		return new MovimientoDto(t.getId(), t.getTxDate(), t.getAmount(), t.getDescription(), t.getReference(),
-				classificationLabel(t.getPendingClassification()), t.getAccountingAmount());
+				classificationLabel(t.getPendingClassification()), t.getAccountingAmount(), duplicateInFile,
+				fuzzyCounterpartId, fuzzyHint, commentCount, attachmentCount);
+	}
+
+	private static String commentKey(PendingMovementSide side, long movementId) {
+		return side.name() + "-" + movementId;
+	}
+
+	private Map<String, Long> commentCountMap(long sessionId) {
+		Map<String, Long> m = new HashMap<>();
+		for (Object[] row : pendingMovementCommentRepository.countByMovementGrouped(sessionId)) {
+			PendingMovementSide side = (PendingMovementSide) row[0];
+			long mid = ((Number) row[1]).longValue();
+			long cnt = ((Number) row[2]).longValue();
+			m.put(commentKey(side, mid), cnt);
+		}
+		return m;
+	}
+
+	private Map<String, Long> attachmentCountMap(long sessionId) {
+		Map<String, Long> m = new HashMap<>();
+		for (Object[] row : movementAttachmentRepository.countByMovementGrouped(sessionId)) {
+			PendingMovementSide side = (PendingMovementSide) row[0];
+			long mid = ((Number) row[1]).longValue();
+			long cnt = ((Number) row[2]).longValue();
+			m.put(commentKey(side, mid), cnt);
+		}
+		return m;
+	}
+
+	private Map<Long, Long> pairAttachmentCountMap(long sessionId) {
+		Map<Long, Long> m = new HashMap<>();
+		for (Object[] row : pairAttachmentRepository.countByPairGrouped(sessionId)) {
+			long pairId = ((Number) row[0]).longValue();
+			long cnt = ((Number) row[1]).longValue();
+			m.put(pairId, cnt);
+		}
+		return m;
+	}
+
+	private static String fuzzyHint(String lado, long otherId) {
+		return "Posible match · revisar " + lado + " ID " + otherId;
+	}
+
+	private static Set<Long> duplicateIdsBank(List<BankTransaction> banks) {
+		Map<String, List<BankTransaction>> g = new HashMap<>();
+		for (BankTransaction t : banks) {
+			String k = t.getTxDate().toString() + "|" + t.getAmount().stripTrailingZeros().toPlainString();
+			g.computeIfAbsent(k, x -> new ArrayList<>()).add(t);
+		}
+		Set<Long> out = new HashSet<>();
+		for (List<BankTransaction> grp : g.values()) {
+			if (grp.size() > 1) {
+				for (BankTransaction t : grp) {
+					out.add(t.getId());
+				}
+			}
+		}
+		return out;
+	}
+
+	private static Set<Long> duplicateIdsCompany(List<CompanyTransaction> companies) {
+		Map<String, List<CompanyTransaction>> g = new HashMap<>();
+		for (CompanyTransaction t : companies) {
+			String k = t.getTxDate().toString() + "|" + t.getAmount().stripTrailingZeros().toPlainString();
+			g.computeIfAbsent(k, x -> new ArrayList<>()).add(t);
+		}
+		Set<Long> out = new HashSet<>();
+		for (List<CompanyTransaction> grp : g.values()) {
+			if (grp.size() > 1) {
+				for (CompanyTransaction t : grp) {
+					out.add(t.getId());
+				}
+			}
+		}
+		return out;
+	}
+
+	/**
+	 * Pendientes con importe cercano y fecha en ventana (no emparejados por la corrida automática).
+	 */
+	private static Map<Long, Long> computeFuzzyCandidatesBankToCompany(List<BankTransaction> unmatchedBanks,
+			List<CompanyTransaction> unmatchedCompanies) {
+		Map<Long, Long> out = new HashMap<>();
+		if (unmatchedBanks.isEmpty() || unmatchedCompanies.isEmpty()) {
+			return out;
+		}
+		BigDecimal maxPct = new BigDecimal("0.08");
+		BigDecimal maxAbs = new BigDecimal("5000");
+		int maxDays = 10;
+		for (BankTransaction b : unmatchedBanks) {
+			CompanyTransaction best = null;
+			BigDecimal bestDiff = null;
+			for (CompanyTransaction c : unmatchedCompanies) {
+				long days = Math.abs(ChronoUnit.DAYS.between(b.getTxDate(), c.getTxDate()));
+				if (days > maxDays) {
+					continue;
+				}
+				BigDecimal diff = b.getAmount().subtract(c.getAmount()).abs();
+				BigDecimal ceiling = b.getAmount().abs().multiply(maxPct).max(maxAbs);
+				if (diff.compareTo(ceiling) > 0) {
+					continue;
+				}
+				if (best == null || diff.compareTo(bestDiff) < 0) {
+					best = c;
+					bestDiff = diff;
+				}
+			}
+			if (best != null) {
+				out.put(b.getId(), best.getId());
+			}
+		}
+		return out;
+	}
+
+	private static Map<Long, Long> invertFuzzyMap(Map<Long, Long> bankToCompany) {
+		Map<Long, Long> companyToBank = new HashMap<>();
+		for (Map.Entry<Long, Long> e : bankToCompany.entrySet()) {
+			companyToBank.putIfAbsent(e.getValue(), e.getKey());
+		}
+		return companyToBank;
 	}
 
 	private static String classificationLabel(PendingClassification c) {
 		return c == null ? null : c.name();
 	}
 
-	private ParDto toPar(ReconciliationPair p) {
+	private ParDto toPar(ReconciliationPair p, BigDecimal amountGapThreshold, long pairAttachmentCount) {
 		BankTransaction b = p.getBankTransaction();
 		CompanyTransaction c = p.getCompanyTransaction();
 		return new ParDto(p.getId(), p.getMatchSource().name(), b.getId(), c.getId(), b.getAmount(), c.getAmount(),
-				b.getTxDate(), c.getTxDate());
+				b.getTxDate(), c.getTxDate(), pairKind(b.getAmount(), c.getAmount(), amountGapThreshold),
+				pairAttachmentCount);
+	}
+
+	private static String pairKind(BigDecimal bankAmount, BigDecimal companyAmount, BigDecimal amountGapThreshold) {
+		if (bankAmount.signum() != 0 && companyAmount.signum() != 0
+				&& bankAmount.signum() != companyAmount.signum()) {
+			return "OPPOSITE_SIGN";
+		}
+		if (bankAmount.subtract(companyAmount).abs().compareTo(amountGapThreshold) > 0) {
+			return "AMOUNT_GAP";
+		}
+		return "EXACT";
 	}
 }

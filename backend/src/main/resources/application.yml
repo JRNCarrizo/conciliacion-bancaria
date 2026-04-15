@@ -14,6 +14,9 @@ server:
 app:
   cors:
     allowed-origins: "http://localhost:5173,http://127.0.0.1:5173"
+  upload:
+    # Directorio base (se crea al iniciar). En producción: APP_UPLOAD_BASE_DIR o ruta fija en el servidor.
+    base-dir: ${APP_UPLOAD_BASE_DIR:${user.home}/.conciliacion-bancaria/uploads}
 
 ---
 spring:
