@@ -2,6 +2,9 @@ package com.SistemaConciliacion.Consiliacion.modules.conciliacion.api;
 
 import java.io.IOException;
 import java.math.BigDecimal;
+
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
@@ -29,6 +32,7 @@ import org.springframework.web.multipart.MultipartFile;
 import org.springframework.http.ContentDisposition;
 
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.ClassificationUpdateDto;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.ImportLayoutDto;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.CommentCreateDto;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.PendingCommentDto;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.ConciliacionRunResultDto;
@@ -54,6 +58,8 @@ import com.SistemaConciliacion.Consiliacion.modules.conciliacion.service.Concili
 @RestController
 @RequestMapping("/api/v1/conciliacion")
 public class ConciliacionController {
+
+	private static final ObjectMapper IMPORT_LAYOUT_JSON = new ObjectMapper();
 
 	private final ConciliacionImportService conciliacionImportService;
 	private final ConciliacionSessionService conciliacionSessionService;
@@ -84,13 +90,22 @@ public class ConciliacionController {
 		return Map.of(
 				"module", "conciliacion",
 				"ready", true,
-				"note", "GET export.csv | export.xlsx (Resumen, Conciliados, Pendientes banco/empresa, Detalle completo), POST /sessions/{id}/pares manual; AUTO no borra MANUAL al conciliar");
+				"note", "POST /import opcional ?layout= JSON (mapeo filas/columnas banco y empresa); GET export.csv | export.xlsx; POST /sessions/{id}/pares manual; AUTO no borra MANUAL al conciliar");
 	}
 
 	@PostMapping(value = "/import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
 	public ConciliacionImportService.ImportResult importFiles(@RequestParam("bank") MultipartFile bank,
-			@RequestParam("company") MultipartFile company) throws IOException {
-		return conciliacionImportService.importFiles(bank, company);
+			@RequestParam("company") MultipartFile company,
+			@RequestParam(value = "layout", required = false) String layoutJson) throws IOException {
+		ImportLayoutDto layout = null;
+		if (layoutJson != null && !layoutJson.isBlank()) {
+			try {
+				layout = IMPORT_LAYOUT_JSON.readValue(layoutJson, ImportLayoutDto.class);
+			} catch (JsonProcessingException e) {
+				throw new IllegalArgumentException("Parámetro layout: JSON inválido.");
+			}
+		}
+		return conciliacionImportService.importFiles(bank, company, layout);
 	}
 
 	@GetMapping("/sessions")

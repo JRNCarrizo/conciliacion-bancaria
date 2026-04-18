@@ -16,35 +16,32 @@ import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.Reconcil
 @Component
 public class BancoWorkbookParser {
 
-	private static final int HEADER_ROW_INDEX = 7;
-	private static final int FIRST_DATA_ROW_INDEX = 8;
-	private static final int COL_FECHA = 0;
-	private static final int COL_REF = 3;
-	private static final int COL_CONCEPTO = 5;
-	private static final int COL_IMPORTE = 6;
-
-	public void assertHeader(Sheet sheet) {
-		Row header = sheet.getRow(HEADER_ROW_INDEX);
+	public void assertHeader(Sheet sheet, BankGridLayout layout) {
+		Row header = sheet.getRow(layout.headerRowIndex());
 		if (header == null) {
-			throw new IllegalArgumentException("Archivo de banco: no se encontró la fila de encabezados (fila 8).");
+			throw new IllegalArgumentException("Archivo de banco: no se encontró la fila de encabezados (fila "
+					+ (layout.headerRowIndex() + 1) + ").");
 		}
-		String importe = ExcelCells.asString(header.getCell(COL_IMPORTE));
+		if (layout.skipHeaderValidation()) {
+			return;
+		}
+		String importe = ExcelCells.asString(header.getCell(layout.colAmount()));
 		if (importe == null || !importe.toLowerCase(Locale.ROOT).contains("importe")) {
 			throw new IllegalArgumentException(
-					"Archivo de banco: la columna Importe no está donde se espera (formato extracto estándar).");
+					"Archivo de banco: la columna Importe no coincide con el mapeo (o activá omitir validación de encabezado).");
 		}
 	}
 
-	public List<BankTransaction> parse(Sheet sheet, ReconciliationSession session) {
-		assertHeader(sheet);
+	public List<BankTransaction> parse(Sheet sheet, ReconciliationSession session, BankGridLayout layout) {
+		assertHeader(sheet, layout);
 		List<BankTransaction> out = new ArrayList<>();
-		for (int r = FIRST_DATA_ROW_INDEX; r <= sheet.getLastRowNum(); r++) {
+		for (int r = layout.firstDataRowIndex(); r <= sheet.getLastRowNum(); r++) {
 			Row row = sheet.getRow(r);
-			if (row == null || isEmptyDataRow(row)) {
+			if (row == null || isEmptyDataRow(row, layout)) {
 				continue;
 			}
-			LocalDate d = ExcelCells.asLocalDate(row.getCell(COL_FECHA));
-			BigDecimal amt = ExcelCells.asBigDecimal(row.getCell(COL_IMPORTE));
+			LocalDate d = ExcelCells.asLocalDate(row.getCell(layout.colDate()));
+			BigDecimal amt = ExcelCells.asBigDecimal(row.getCell(layout.colAmount()));
 			if (d == null && amt == null) {
 				continue;
 			}
@@ -58,8 +55,8 @@ public class BancoWorkbookParser {
 			bt.setSession(session);
 			bt.setTxDate(d);
 			bt.setAmount(amt);
-			bt.setReference(ExcelCells.asString(row.getCell(COL_REF)));
-			bt.setDescription(ExcelCells.asString(row.getCell(COL_CONCEPTO)));
+			bt.setReference(ExcelCells.asString(row.getCell(layout.colReference())));
+			bt.setDescription(ExcelCells.asString(row.getCell(layout.colDescription())));
 			out.add(bt);
 		}
 		if (out.isEmpty()) {
@@ -68,7 +65,8 @@ public class BancoWorkbookParser {
 		return out;
 	}
 
-	private boolean isEmptyDataRow(Row row) {
-		return ExcelCells.isBlank(row.getCell(COL_FECHA)) && ExcelCells.isBlank(row.getCell(COL_IMPORTE));
+	private boolean isEmptyDataRow(Row row, BankGridLayout layout) {
+		return ExcelCells.isBlank(row.getCell(layout.colDate()))
+				&& ExcelCells.isBlank(row.getCell(layout.colAmount()));
 	}
 }

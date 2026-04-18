@@ -1,11 +1,18 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import './conciliacion.css'
-import { SESSION_HISTORY_PAGE_SIZE, STATUS_LABEL } from './constants'
+import {
+  DEFAULT_IMPORT_BANK_LAYOUT_EXCEL,
+  DEFAULT_IMPORT_COMPANY_LAYOUT_EXCEL,
+  SESSION_HISTORY_PAGE_SIZE,
+  STATUS_LABEL,
+} from './constants'
 import type {
   CompareFilterKind,
   ComparisonRow,
   ConciliacionRunResult,
   ConciliacionStatsDto,
+  ImportBankLayoutExcel,
+  ImportCompanyLayoutExcel,
   ImportResult,
   MovementAttachmentDto,
   MovimientoDto,
@@ -38,6 +45,11 @@ import {
   statusPanelClass,
 } from './utils/format'
 import { parseBalanceInput, parseTransactionId } from './utils/parse'
+import {
+  bankLayoutExcelToApi,
+  companyLayoutExcelToApi,
+  normalizeColumnLettersInput,
+} from './utils/importLayoutExcel'
 
 const AMOUNT_TOLERANCE_ARROW_STEP = 0.01
 
@@ -2014,6 +2026,9 @@ function ComparisonTable({
       <table className="data-table compare-table">
         <thead>
           <tr>
+            <th rowSpan={2} className="rownum-th" aria-label="Número de fila">
+              #
+            </th>
             <th rowSpan={2} className="compare-th-tipo">
               Estado
             </th>
@@ -2048,14 +2063,14 @@ function ComparisonTable({
         <tbody>
           {rows.length === 0 ? (
             <tr>
-              <td colSpan={13} className="compare-empty">
+              <td colSpan={14} className="compare-empty">
                 {allRowsCount === 0
                   ? 'No hay movimientos en esta sesión.'
                   : 'No hay filas que coincidan. Probá «Todos», ampliá fechas, vaciá el buscador o el filtro de clasificación, o cambiá el texto.'}
               </td>
             </tr>
           ) : (
-            rows.map((row) => {
+            rows.map((row, idx) => {
               const cls = rowClassForComparison(row, sessionAmountTolerance)
               if (row.kind === 'pair') {
                 const { pair, bank, company } = row
@@ -2065,6 +2080,7 @@ function ComparisonTable({
                 const estado = pairEstadoMeta(pair, bank, company, sessionAmountTolerance)
                 return (
                   <tr key={row.key} className={cls}>
+                    <td className="rownum-td">{idx + 1}</td>
                     <td className="compare-td-tipo">
                       <span className={estado.badgeClass}>{estado.label}</span>
                     </td>
@@ -2135,6 +2151,7 @@ function ComparisonTable({
                 const { m } = row
                 return (
                   <tr key={row.key} className={cls}>
+                    <td className="rownum-td">{idx + 1}</td>
                     <td className="compare-td-tipo compare-td-tipo--stack">
                       <span className="compare-badge compare-badge--estado compare-badge--warn">
                         Pendiente banco
@@ -2196,6 +2213,7 @@ function ComparisonTable({
               const { m } = row
               return (
                 <tr key={row.key} className={cls}>
+                  <td className="rownum-td">{idx + 1}</td>
                   <td className="compare-td-tipo compare-td-tipo--stack">
                     <span className="compare-badge compare-badge--estado compare-badge--company">
                       Pendiente empresa
@@ -2331,6 +2349,9 @@ function MovimientosTable({
         <table className="data-table">
           <thead>
             <tr>
+              <th className="rownum-th" aria-label="Número de fila">
+                #
+              </th>
               <th>ID</th>
               <th>Fecha</th>
               <th>Importe</th>
@@ -2350,8 +2371,9 @@ function MovimientosTable({
             </tr>
           </thead>
           <tbody>
-            {rows.map((m) => (
+            {rows.map((m, idx) => (
               <tr key={m.id}>
+                <td className="rownum-td">{idx + 1}</td>
                 <td>{m.id}</td>
                 <td className="cell-date-nowrap">{formatDisplayDate(m.txDate)}</td>
                 <td>{m.amount}</td>
@@ -2395,6 +2417,14 @@ function MovimientosTable({
 export default function ConciliacionPage() {
   const [bankFile, setBankFile] = useState<File | null>(null)
   const [companyFile, setCompanyFile] = useState<File | null>(null)
+  const [useCustomImportLayout, setUseCustomImportLayout] = useState(false)
+  const [importBankLayoutExcel, setImportBankLayoutExcel] = useState<ImportBankLayoutExcel>(() => ({
+    ...DEFAULT_IMPORT_BANK_LAYOUT_EXCEL,
+  }))
+  const [importCompanyLayoutExcel, setImportCompanyLayoutExcel] =
+    useState<ImportCompanyLayoutExcel>(() => ({
+      ...DEFAULT_IMPORT_COMPANY_LAYOUT_EXCEL,
+    }))
   const [importing, setImporting] = useState(false)
   const [importResult, setImportResult] = useState<ImportResult | null>(null)
   const [importError, setImportError] = useState<string | null>(null)
@@ -2662,6 +2692,17 @@ export default function ConciliacionPage() {
       const fd = new FormData()
       fd.append('bank', bankFile)
       fd.append('company', companyFile)
+      if (useCustomImportLayout) {
+        const bankApi = bankLayoutExcelToApi(importBankLayoutExcel)
+        const companyApi = companyLayoutExcelToApi(importCompanyLayoutExcel)
+        fd.append(
+          'layout',
+          JSON.stringify({
+            bank: bankApi,
+            company: companyApi,
+          }),
+        )
+      }
       const r = await fetch('/api/v1/conciliacion/import', {
         method: 'POST',
         body: fd,
@@ -3024,6 +3065,349 @@ export default function ConciliacionPage() {
                   Descargar plantilla
                 </a>
               </label>
+            </div>
+            <div className="import-layout-section">
+              <label className="import-layout-toggle-label">
+                <input
+                  type="checkbox"
+                  checked={useCustomImportLayout}
+                  onChange={(ev) => {
+                    const on = ev.target.checked
+                    setUseCustomImportLayout(on)
+                    if (on) {
+                      setImportBankLayoutExcel({ ...DEFAULT_IMPORT_BANK_LAYOUT_EXCEL })
+                      setImportCompanyLayoutExcel({ ...DEFAULT_IMPORT_COMPANY_LAYOUT_EXCEL })
+                    }
+                  }}
+                />{' '}
+                Mapeo personalizado de filas y columnas (si el Excel cambió de posición)
+              </label>
+              {useCustomImportLayout && (
+                <div className="import-layout-advanced">
+                  <p className="import-layout-help">
+                    Usá el <strong>mismo criterio que Excel</strong>: número de fila como en el margen
+                    izquierdo de la hoja (1 = primera fila) y letra de columna como encima de la grilla
+                    (A, B, … Z, AA). El texto de arriba del extracto (título, datos de cuenta) no cuenta
+                    como &quot;fila de títulos&quot;: esa fila es solo donde están los nombres Fecha,
+                    Importe, etc.
+                  </p>
+                  <div className="import-layout-grid">
+                    <div>
+                      <h3 className="import-layout-h3">Extracto banco</h3>
+                      <div className="import-layout-fields">
+                        <label className="import-layout-field">
+                          <span>Hoja (1 = primera pestaña)</span>
+                          <input
+                            type="number"
+                            min={1}
+                            value={importBankLayoutExcel.sheetNumber}
+                            onChange={(e) =>
+                              setImportBankLayoutExcel((p) => ({
+                                ...p,
+                                sheetNumber: Math.max(1, parseInt(e.target.value, 10) || 1),
+                              }))
+                            }
+                          />
+                        </label>
+                        <label className="import-layout-field">
+                          <span>Fila de títulos de columnas</span>
+                          <input
+                            type="number"
+                            min={1}
+                            value={importBankLayoutExcel.titleRowNumber}
+                            onChange={(e) =>
+                              setImportBankLayoutExcel((p) => ({
+                                ...p,
+                                titleRowNumber: Math.max(1, parseInt(e.target.value, 10) || 1),
+                              }))
+                            }
+                          />
+                        </label>
+                        <label className="import-layout-field">
+                          <span>Primera fila de movimientos</span>
+                          <input
+                            type="number"
+                            min={1}
+                            value={importBankLayoutExcel.firstDataRowNumber}
+                            onChange={(e) =>
+                              setImportBankLayoutExcel((p) => ({
+                                ...p,
+                                firstDataRowNumber: Math.max(1, parseInt(e.target.value, 10) || 1),
+                              }))
+                            }
+                          />
+                        </label>
+                        <label className="import-layout-field">
+                          <span>Columna fecha</span>
+                          <input
+                            type="text"
+                            className="import-layout-col-input"
+                            autoCapitalize="characters"
+                            spellCheck={false}
+                            maxLength={3}
+                            value={importBankLayoutExcel.colDate}
+                            onChange={(e) =>
+                              setImportBankLayoutExcel((p) => ({
+                                ...p,
+                                colDate: normalizeColumnLettersInput(e.target.value),
+                              }))
+                            }
+                          />
+                        </label>
+                        <label className="import-layout-field">
+                          <span>Columna referencia</span>
+                          <input
+                            type="text"
+                            className="import-layout-col-input"
+                            autoCapitalize="characters"
+                            spellCheck={false}
+                            maxLength={3}
+                            value={importBankLayoutExcel.colReference}
+                            onChange={(e) =>
+                              setImportBankLayoutExcel((p) => ({
+                                ...p,
+                                colReference: normalizeColumnLettersInput(e.target.value),
+                              }))
+                            }
+                          />
+                        </label>
+                        <label className="import-layout-field">
+                          <span>Columna descripción</span>
+                          <input
+                            type="text"
+                            className="import-layout-col-input"
+                            autoCapitalize="characters"
+                            spellCheck={false}
+                            maxLength={3}
+                            value={importBankLayoutExcel.colDescription}
+                            onChange={(e) =>
+                              setImportBankLayoutExcel((p) => ({
+                                ...p,
+                                colDescription: normalizeColumnLettersInput(e.target.value),
+                              }))
+                            }
+                          />
+                        </label>
+                        <label className="import-layout-field">
+                          <span>Columna importe</span>
+                          <input
+                            type="text"
+                            className="import-layout-col-input"
+                            autoCapitalize="characters"
+                            spellCheck={false}
+                            maxLength={3}
+                            value={importBankLayoutExcel.colAmount}
+                            onChange={(e) =>
+                              setImportBankLayoutExcel((p) => ({
+                                ...p,
+                                colAmount: normalizeColumnLettersInput(e.target.value),
+                              }))
+                            }
+                          />
+                        </label>
+                        <label
+                          className="import-layout-field import-layout-field--check"
+                          title="Por defecto el sistema comprueba que en la fila de títulos la celda de importe contenga la palabra «Importe». Si tu Excel dice «Monto», «Amount», etc., activá esto para importar igual."
+                        >
+                          <input
+                            type="checkbox"
+                            checked={importBankLayoutExcel.skipHeaderValidation}
+                            onChange={(e) =>
+                              setImportBankLayoutExcel((p) => ({
+                                ...p,
+                                skipHeaderValidation: e.target.checked,
+                              }))
+                            }
+                          />{' '}
+                          Omitir revisión del texto &quot;Importe&quot; en el encabezado de esa columna
+                        </label>
+                      </div>
+                    </div>
+                    <div>
+                      <h3 className="import-layout-h3">Libro / plataforma (debe − haber)</h3>
+                      <div className="import-layout-fields">
+                        <label className="import-layout-field">
+                          <span>Hoja (1 = primera pestaña)</span>
+                          <input
+                            type="number"
+                            min={1}
+                            value={importCompanyLayoutExcel.sheetNumber}
+                            onChange={(e) =>
+                              setImportCompanyLayoutExcel((p) => ({
+                                ...p,
+                                sheetNumber: Math.max(1, parseInt(e.target.value, 10) || 1),
+                              }))
+                            }
+                          />
+                        </label>
+                        <label className="import-layout-field">
+                          <span>Fila de títulos de columnas</span>
+                          <input
+                            type="number"
+                            min={1}
+                            value={importCompanyLayoutExcel.titleRowNumber}
+                            onChange={(e) =>
+                              setImportCompanyLayoutExcel((p) => ({
+                                ...p,
+                                titleRowNumber: Math.max(1, parseInt(e.target.value, 10) || 1),
+                              }))
+                            }
+                          />
+                        </label>
+                        <label className="import-layout-field">
+                          <span>Primera fila de movimientos</span>
+                          <input
+                            type="number"
+                            min={1}
+                            value={importCompanyLayoutExcel.firstDataRowNumber}
+                            onChange={(e) =>
+                              setImportCompanyLayoutExcel((p) => ({
+                                ...p,
+                                firstDataRowNumber: Math.max(1, parseInt(e.target.value, 10) || 1),
+                              }))
+                            }
+                          />
+                        </label>
+                        <label className="import-layout-field">
+                          <span>Columna fecha contable</span>
+                          <input
+                            type="text"
+                            className="import-layout-col-input"
+                            autoCapitalize="characters"
+                            spellCheck={false}
+                            maxLength={3}
+                            value={importCompanyLayoutExcel.colFechaContable}
+                            onChange={(e) =>
+                              setImportCompanyLayoutExcel((p) => ({
+                                ...p,
+                                colFechaContable: normalizeColumnLettersInput(e.target.value),
+                              }))
+                            }
+                          />
+                        </label>
+                        <label className="import-layout-field">
+                          <span>Columna tipo</span>
+                          <input
+                            type="text"
+                            className="import-layout-col-input"
+                            autoCapitalize="characters"
+                            spellCheck={false}
+                            maxLength={3}
+                            value={importCompanyLayoutExcel.colTipo}
+                            onChange={(e) =>
+                              setImportCompanyLayoutExcel((p) => ({
+                                ...p,
+                                colTipo: normalizeColumnLettersInput(e.target.value),
+                              }))
+                            }
+                          />
+                        </label>
+                        <label className="import-layout-field">
+                          <span>Columna número</span>
+                          <input
+                            type="text"
+                            className="import-layout-col-input"
+                            autoCapitalize="characters"
+                            spellCheck={false}
+                            maxLength={3}
+                            value={importCompanyLayoutExcel.colNumero}
+                            onChange={(e) =>
+                              setImportCompanyLayoutExcel((p) => ({
+                                ...p,
+                                colNumero: normalizeColumnLettersInput(e.target.value),
+                              }))
+                            }
+                          />
+                        </label>
+                        <label className="import-layout-field">
+                          <span>Columna fecha banco</span>
+                          <input
+                            type="text"
+                            className="import-layout-col-input"
+                            autoCapitalize="characters"
+                            spellCheck={false}
+                            maxLength={3}
+                            value={importCompanyLayoutExcel.colFechaBanco}
+                            onChange={(e) =>
+                              setImportCompanyLayoutExcel((p) => ({
+                                ...p,
+                                colFechaBanco: normalizeColumnLettersInput(e.target.value),
+                              }))
+                            }
+                          />
+                        </label>
+                        <label className="import-layout-field">
+                          <span>Columna debe</span>
+                          <input
+                            type="text"
+                            className="import-layout-col-input"
+                            autoCapitalize="characters"
+                            spellCheck={false}
+                            maxLength={3}
+                            value={importCompanyLayoutExcel.colDebe}
+                            onChange={(e) =>
+                              setImportCompanyLayoutExcel((p) => ({
+                                ...p,
+                                colDebe: normalizeColumnLettersInput(e.target.value),
+                              }))
+                            }
+                          />
+                        </label>
+                        <label className="import-layout-field">
+                          <span>Columna haber</span>
+                          <input
+                            type="text"
+                            className="import-layout-col-input"
+                            autoCapitalize="characters"
+                            spellCheck={false}
+                            maxLength={3}
+                            value={importCompanyLayoutExcel.colHaber}
+                            onChange={(e) =>
+                              setImportCompanyLayoutExcel((p) => ({
+                                ...p,
+                                colHaber: normalizeColumnLettersInput(e.target.value),
+                              }))
+                            }
+                          />
+                        </label>
+                        <label className="import-layout-field">
+                          <span>Columna observación</span>
+                          <input
+                            type="text"
+                            className="import-layout-col-input"
+                            autoCapitalize="characters"
+                            spellCheck={false}
+                            maxLength={3}
+                            value={importCompanyLayoutExcel.colObservacion}
+                            onChange={(e) =>
+                              setImportCompanyLayoutExcel((p) => ({
+                                ...p,
+                                colObservacion: normalizeColumnLettersInput(e.target.value),
+                              }))
+                            }
+                          />
+                        </label>
+                        <label
+                          className="import-layout-field import-layout-field--check"
+                          title="Por defecto comprueba que la celda de la columna haber contenga «Haber». Si el título es otro, activá esto."
+                        >
+                          <input
+                            type="checkbox"
+                            checked={importCompanyLayoutExcel.skipHeaderValidation}
+                            onChange={(e) =>
+                              setImportCompanyLayoutExcel((p) => ({
+                                ...p,
+                                skipHeaderValidation: e.target.checked,
+                              }))
+                            }
+                          />{' '}
+                          Omitir revisión del texto &quot;Haber&quot; en el encabezado de esa columna
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
             <button type="submit" className="btn-import" disabled={importing}>
               {importing ? 'Importando…' : 'Importar'}
@@ -3458,6 +3842,9 @@ export default function ConciliacionPage() {
                       <table className="data-table">
                         <thead>
                           <tr>
+                            <th className="rownum-th" aria-label="Número de fila">
+                              #
+                            </th>
                             <th>Origen</th>
                             <th>Importe banco</th>
                             <th>Importe empresa</th>
@@ -3468,10 +3855,11 @@ export default function ConciliacionPage() {
                           </tr>
                         </thead>
                         <tbody>
-                          {classicFilteredPairRows.map((row) => {
+                          {classicFilteredPairRows.map((row, idx) => {
                             const { pair: p } = row
                             return (
                               <tr key={p.pairId}>
+                                <td className="rownum-td">{idx + 1}</td>
                                 <td>{p.matchSource}</td>
                                 <td>{p.bankAmount}</td>
                                 <td>{p.companyAmount}</td>

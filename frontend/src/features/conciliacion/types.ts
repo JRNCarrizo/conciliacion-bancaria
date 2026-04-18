@@ -1,3 +1,55 @@
+/** Formulario: filas como número en Excel (1 = primera); columnas como letra(s) A, B, AA… */
+export type ImportBankLayoutExcel = {
+  sheetNumber: number
+  titleRowNumber: number
+  firstDataRowNumber: number
+  colDate: string
+  colReference: string
+  colDescription: string
+  colAmount: string
+  skipHeaderValidation: boolean
+}
+
+export type ImportCompanyLayoutExcel = {
+  sheetNumber: number
+  titleRowNumber: number
+  firstDataRowNumber: number
+  colFechaContable: string
+  colTipo: string
+  colNumero: string
+  colFechaBanco: string
+  colDebe: string
+  colHaber: string
+  colObservacion: string
+  skipHeaderValidation: boolean
+}
+
+/** Índices 0-based enviados al API en `layout` (se derivan desde Import*Excel en la UI). */
+export type ImportBankLayoutInput = {
+  sheetIndex: number
+  headerRowIndex: number
+  firstDataRowIndex: number
+  colDate: number
+  colReference: number
+  colDescription: number
+  colAmount: number
+  skipHeaderValidation: boolean
+}
+
+export type ImportCompanyLayoutInput = {
+  sheetIndex: number
+  headerRowIndex: number
+  firstDataRowIndex: number
+  colFechaContable: number
+  colTipo: number
+  colNumero: number
+  colFechaBanco: number
+  colDebe: number
+  colHaber: number
+  colObservacion: number
+  skipHeaderValidation: boolean
+}
+
 export type ImportResult = {
   sessionId: number
   bankRows: number

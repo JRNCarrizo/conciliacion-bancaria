@@ -25,52 +25,46 @@ import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.Reconcil
 @Component
 public class PlataformaWorkbookParser {
 
-	private static final int HEADER_ROW_INDEX = 2;
-	private static final int FIRST_DATA_ROW_INDEX = 3;
-	private static final int COL_FECHA_CONTABLE = 0;
-	private static final int COL_TIPO = 2;
-	private static final int COL_NUMERO = 3;
-	private static final int COL_FECHA_BANCO = 4;
-	private static final int COL_DEBE = 5;
-	private static final int COL_HABER = 6;
-	private static final int COL_OBS = 9;
-
-	public void assertHeader(Sheet sheet) {
-		Row header = sheet.getRow(HEADER_ROW_INDEX);
+	public void assertHeader(Sheet sheet, CompanyGridLayout layout) {
+		Row header = sheet.getRow(layout.headerRowIndex());
 		if (header == null) {
-			throw new IllegalArgumentException("Archivo de plataforma: no se encontró la fila de encabezados (fila 3).");
+			throw new IllegalArgumentException("Archivo de plataforma: no se encontró la fila de encabezados (fila "
+					+ (layout.headerRowIndex() + 1) + ").");
 		}
-		String haber = ExcelCells.asString(header.getCell(COL_HABER));
+		if (layout.skipHeaderValidation()) {
+			return;
+		}
+		String haber = ExcelCells.asString(header.getCell(layout.colHaber()));
 		if (haber == null || !haber.toLowerCase(Locale.ROOT).contains("haber")) {
 			throw new IllegalArgumentException(
-					"Archivo de plataforma: la columna Haber no está donde se espera (formato TES / resumen bancario).");
+					"Archivo de plataforma: la columna Haber no coincide con el mapeo (o activá omitir validación de encabezado).");
 		}
 	}
 
-	public List<CompanyTransaction> parse(Sheet sheet, ReconciliationSession session) {
-		assertHeader(sheet);
+	public List<CompanyTransaction> parse(Sheet sheet, ReconciliationSession session, CompanyGridLayout layout) {
+		assertHeader(sheet, layout);
 		List<CompanyTransaction> out = new ArrayList<>();
-		for (int r = FIRST_DATA_ROW_INDEX; r <= sheet.getLastRowNum(); r++) {
+		for (int r = layout.firstDataRowIndex(); r <= sheet.getLastRowNum(); r++) {
 			Row row = sheet.getRow(r);
-			if (row == null || isEmptyDataRow(row)) {
+			if (row == null || isEmptyDataRow(row, layout)) {
 				continue;
 			}
-			LocalDate fechaBanco = ExcelCells.asLocalDate(row.getCell(COL_FECHA_BANCO));
-			LocalDate fechaContable = ExcelCells.asLocalDate(row.getCell(COL_FECHA_CONTABLE));
+			LocalDate fechaBanco = ExcelCells.asLocalDate(row.getCell(layout.colFechaBanco()));
+			LocalDate fechaContable = ExcelCells.asLocalDate(row.getCell(layout.colFechaContable()));
 			LocalDate txDate = fechaBanco != null ? fechaBanco : fechaContable;
 			if (txDate == null) {
 				continue;
 			}
-			BigDecimal debe = ExcelCells.asBigDecimalOrZero(row.getCell(COL_DEBE));
-			BigDecimal haber = ExcelCells.asBigDecimalOrZero(row.getCell(COL_HABER));
+			BigDecimal debe = ExcelCells.asBigDecimalOrZero(row.getCell(layout.colDebe()));
+			BigDecimal haber = ExcelCells.asBigDecimalOrZero(row.getCell(layout.colHaber()));
 			BigDecimal accountingNet = haber.subtract(debe);
 			BigDecimal reconciliationAmount = debe.subtract(haber);
 			if (reconciliationAmount.compareTo(BigDecimal.ZERO) == 0) {
 				continue;
 			}
 
-			String tipo = ExcelCells.asString(row.getCell(COL_TIPO));
-			String numero = ExcelCells.asString(row.getCell(COL_NUMERO));
+			String tipo = ExcelCells.asString(row.getCell(layout.colTipo()));
+			String numero = ExcelCells.asString(row.getCell(layout.colNumero()));
 			String reference = buildReference(tipo, numero);
 
 			CompanyTransaction ct = new CompanyTransaction();
@@ -79,7 +73,7 @@ public class PlataformaWorkbookParser {
 			ct.setAmount(reconciliationAmount);
 			ct.setAccountingAmount(accountingNet);
 			ct.setReference(reference);
-			ct.setDescription(ExcelCells.asString(row.getCell(COL_OBS)));
+			ct.setDescription(ExcelCells.asString(row.getCell(layout.colObservacion())));
 			out.add(ct);
 		}
 		if (out.isEmpty()) {
@@ -99,10 +93,10 @@ public class PlataformaWorkbookParser {
 		return tipo;
 	}
 
-	private boolean isEmptyDataRow(Row row) {
-		return ExcelCells.isBlank(row.getCell(COL_FECHA_CONTABLE))
-				&& ExcelCells.isBlank(row.getCell(COL_FECHA_BANCO))
-				&& ExcelCells.isBlank(row.getCell(COL_HABER))
-				&& ExcelCells.isBlank(row.getCell(COL_DEBE));
+	private boolean isEmptyDataRow(Row row, CompanyGridLayout layout) {
+		return ExcelCells.isBlank(row.getCell(layout.colFechaContable()))
+				&& ExcelCells.isBlank(row.getCell(layout.colFechaBanco()))
+				&& ExcelCells.isBlank(row.getCell(layout.colHaber()))
+				&& ExcelCells.isBlank(row.getCell(layout.colDebe()));
 	}
 }
