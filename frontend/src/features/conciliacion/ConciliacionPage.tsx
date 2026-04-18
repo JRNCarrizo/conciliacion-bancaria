@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import './conciliacion.css'
 import {
   DEFAULT_IMPORT_BANK_LAYOUT_EXCEL,
@@ -2895,6 +2896,11 @@ export default function ConciliacionPage() {
       }
     >
       <header className="app-header">
+        <p className="conciliacion-back-wrap">
+          <Link to="/" className="conciliacion-home-link">
+            ← Inicio
+          </Link>
+        </p>
         <h1>Conciliación bancaria</h1>
         <p className="subtitle">
           Importación, sesiones, conciliación por importe (|Δ| ≤ tolerancia) y fecha más cercana

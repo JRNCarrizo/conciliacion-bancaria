@@ -12,6 +12,21 @@
   max-width: min(1280px, calc(100vw - 2rem));
 }
 
+.conciliacion-back-wrap {
+  margin: 0 0 0.35rem;
+}
+
+.conciliacion-home-link {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.conciliacion-home-link:hover {
+  text-decoration: underline;
+}
+
 .app-header h1 {
   font-size: 1.75rem;
   margin: 0 0 0.5rem;
