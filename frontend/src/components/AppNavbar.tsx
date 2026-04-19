@@ -40,9 +40,6 @@ export function AppNavbar() {
               <Link to="/login" className="app-navbar-link app-navbar-link--cta">
                 Iniciar sesión
               </Link>
-              <Link to="/setup" className="app-navbar-link app-navbar-link--muted">
-                Alta administrador
-              </Link>
             </div>
           )}
         </div>

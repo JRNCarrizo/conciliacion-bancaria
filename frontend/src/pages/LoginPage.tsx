@@ -80,7 +80,7 @@ export function LoginPage() {
           </button>
         </form>
         <p className="auth-hint">
-          ¿Primera vez? Si el sistema aún no tiene usuarios, usá
+          ¿Primera vez? Si el sistema aún no tiene admin, usá
           <br />
           <Link to="/setup">alta del administrador</Link>.
         </p>

@@ -1,0 +1,22 @@
+Muestras de importación para Conciliación bancaria
+=================================================
+
+Archivos generados (podés volver a crearlos con: py -3 generar_muestras.py)
+
+1) muestra-plataforma-empresa.xlsx
+   - Formato tipo TES / resumen bancario (columna "Haber" en encabezados).
+   - Encabezados en fila 3, datos desde fila 4 — coincide con el layout por defecto del sistema.
+
+2) muestra-extracto-banco.xlsx
+   - Extracto ficticio con columna "Importe" en G (fila de títulos en fila 8, datos desde fila 9).
+   - Coincide con el layout por defecto del import de banco.
+
+Datos de ejemplo
+----------------
+- Tres movimientos están pensados para emparejar entre sí (mismos importes y fechas cercanas).
+- Un movimiento solo en libro y otro solo en banco sirven para probar pendientes / diferencias.
+
+Import en la app
+----------------
+En Importar: seleccioná "muestra-extracto-banco.xlsx" como banco y "muestra-plataforma-empresa.xlsx" como empresa/plataforma.
+No hace falta mapeo personalizado si dejás los valores por defecto del formulario.

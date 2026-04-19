@@ -560,6 +560,7 @@ html[data-theme='dark'] .import-form-files .import-file-input::-webkit-file-uplo
 .history-table .cell-num {
   text-align: right;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .history-table .cell-nowrap {
@@ -2215,7 +2216,7 @@ html[data-theme='dark'] .msg.err {
 .comment-modal-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 1000;
+  z-index: 2100;
   background: rgba(15, 23, 42, 0.45);
   display: flex;
   align-items: center;
@@ -2525,7 +2526,7 @@ html[data-theme='light'] .attachment-thread-btn:hover {
 .image-lightbox-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 1100;
+  z-index: 2200;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2691,9 +2692,10 @@ html[data-theme='light'] .attachment-thread-btn:hover {
   line-height: 1rem;
   text-align: center;
   color: #fff;
-  background: var(--accent);
+  background: #dc2626;
   border-radius: 999px;
   box-sizing: border-box;
+  box-shadow: 0 0 0 1px color-mix(in srgb, #fff 35%, transparent);
 }
 
 /* Tema claro (solo conciliación, .app): celdas y texto más legibles */
