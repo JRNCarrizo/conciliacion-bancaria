@@ -43,6 +43,7 @@ import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.Movemen
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.SessionBalancesDto;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.SessionDetailDto;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.SessionHeaderDto;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.SessionAuditEntryDto;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.SessionSummaryDto;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.service.ConciliacionExportService;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.service.ConciliacionExportService.ExportKind;
@@ -55,6 +56,7 @@ import com.SistemaConciliacion.Consiliacion.modules.conciliacion.service.PairAtt
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.excel.PlataformaImportTemplateBuilder;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.PendingMovementSide;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.service.ConciliacionSessionService;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.service.SessionAuditService;
 
 @RestController
 @RequestMapping("/api/v1/conciliacion")
@@ -69,6 +71,7 @@ public class ConciliacionController {
 	private final ConciliacionExportService conciliacionExportService;
 	private final MovementAttachmentService movementAttachmentService;
 	private final PairAttachmentService pairAttachmentService;
+	private final SessionAuditService sessionAuditService;
 
 	public ConciliacionController(ConciliacionImportService conciliacionImportService,
 			ConciliacionSessionService conciliacionSessionService,
@@ -76,7 +79,8 @@ public class ConciliacionController {
 			ConciliacionManualPairService conciliacionManualPairService,
 			ConciliacionExportService conciliacionExportService,
 			MovementAttachmentService movementAttachmentService,
-			PairAttachmentService pairAttachmentService) {
+			PairAttachmentService pairAttachmentService,
+			SessionAuditService sessionAuditService) {
 		this.conciliacionImportService = conciliacionImportService;
 		this.conciliacionSessionService = conciliacionSessionService;
 		this.conciliacionMatchingService = conciliacionMatchingService;
@@ -84,6 +88,7 @@ public class ConciliacionController {
 		this.conciliacionExportService = conciliacionExportService;
 		this.movementAttachmentService = movementAttachmentService;
 		this.pairAttachmentService = pairAttachmentService;
+		this.sessionAuditService = sessionAuditService;
 	}
 
 	@GetMapping("/status")
@@ -115,8 +120,14 @@ public class ConciliacionController {
 	}
 
 	@GetMapping("/sessions/{id}")
-	public SessionDetailDto getSession(@PathVariable long id) {
-		return conciliacionSessionService.getSessionDetail(id);
+	public SessionDetailDto getSession(@PathVariable long id,
+			@RequestParam(value = "recordAccess", defaultValue = "false") boolean recordAccess) {
+		return conciliacionSessionService.getSessionDetail(id, recordAccess);
+	}
+
+	@GetMapping("/sessions/{id}/activity")
+	public List<SessionAuditEntryDto> listSessionActivity(@PathVariable long id) {
+		return sessionAuditService.listForSession(id);
 	}
 
 	@PutMapping(value = "/sessions/{id}/balances", consumes = MediaType.APPLICATION_JSON_VALUE)

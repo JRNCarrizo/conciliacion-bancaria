@@ -15,6 +15,7 @@ import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.ImportL
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.BankTransaction;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.CompanyTransaction;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.ReconciliationSession;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.SessionAuditEventType;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.SessionStatus;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.excel.BancoWorkbookParser;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.excel.BankGridLayout;
@@ -32,17 +33,20 @@ public class ConciliacionImportService {
 	private final CompanyTransactionRepository companyTransactionRepository;
 	private final BancoWorkbookParser bancoWorkbookParser;
 	private final PlataformaWorkbookParser plataformaWorkbookParser;
+	private final SessionAuditService sessionAuditService;
 
 	public ConciliacionImportService(ReconciliationSessionRepository sessionRepository,
 			BankTransactionRepository bankTransactionRepository,
 			CompanyTransactionRepository companyTransactionRepository,
 			BancoWorkbookParser bancoWorkbookParser,
-			PlataformaWorkbookParser plataformaWorkbookParser) {
+			PlataformaWorkbookParser plataformaWorkbookParser,
+			SessionAuditService sessionAuditService) {
 		this.sessionRepository = sessionRepository;
 		this.bankTransactionRepository = bankTransactionRepository;
 		this.companyTransactionRepository = companyTransactionRepository;
 		this.bancoWorkbookParser = bancoWorkbookParser;
 		this.plataformaWorkbookParser = plataformaWorkbookParser;
+		this.sessionAuditService = sessionAuditService;
 	}
 
 	/**
@@ -85,9 +89,18 @@ public class ConciliacionImportService {
 			bankTransactionRepository.saveAll(bankRows);
 			companyTransactionRepository.saveAll(companyRows);
 
+			String auditDetail = importDetail(session.getSourceBankFileName(), session.getSourceCompanyFileName());
+			sessionAuditService.append(session.getId(), SessionAuditEventType.IMPORT, auditDetail);
+
 			return new ImportResult(session.getId(), bankRows.size(), companyRows.size(),
 					session.getSourceBankFileName(), session.getSourceCompanyFileName());
 		}
+	}
+
+	private static String importDetail(String bankName, String companyName) {
+		String b = bankName != null && !bankName.isBlank() ? bankName : "—";
+		String c = companyName != null && !companyName.isBlank() ? companyName : "—";
+		return "Banco: " + b + " · Empresa: " + c;
 	}
 
 	private static void validateMultipart(MultipartFile file, String role) {

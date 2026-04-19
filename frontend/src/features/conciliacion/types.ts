@@ -69,6 +69,16 @@ export type SessionSummary = {
   matchedPairs: number
 }
 
+/** Auditoría por sesión (import, conciliar, saldos, cierre). */
+export type SessionAuditEntry = {
+  id: number
+  eventType: string
+  eventLabel: string
+  username: string
+  createdAt: string
+  detail: string | null
+}
+
 export type PageSessions = {
   content: SessionSummary[]
   totalElements: number

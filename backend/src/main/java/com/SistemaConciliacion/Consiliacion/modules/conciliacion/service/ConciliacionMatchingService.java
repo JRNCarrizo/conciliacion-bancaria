@@ -19,6 +19,7 @@ import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.CompanyT
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.MatchSource;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.ReconciliationPair;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.ReconciliationSession;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.SessionAuditEventType;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.SessionStatus;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.repository.BankTransactionRepository;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.repository.CompanyTransactionRepository;
@@ -34,15 +35,18 @@ public class ConciliacionMatchingService {
 	private final BankTransactionRepository bankTransactionRepository;
 	private final CompanyTransactionRepository companyTransactionRepository;
 	private final ReconciliationPairRepository reconciliationPairRepository;
+	private final SessionAuditService sessionAuditService;
 
 	public ConciliacionMatchingService(ReconciliationSessionRepository sessionRepository,
 			BankTransactionRepository bankTransactionRepository,
 			CompanyTransactionRepository companyTransactionRepository,
-			ReconciliationPairRepository reconciliationPairRepository) {
+			ReconciliationPairRepository reconciliationPairRepository,
+			SessionAuditService sessionAuditService) {
 		this.sessionRepository = sessionRepository;
 		this.bankTransactionRepository = bankTransactionRepository;
 		this.companyTransactionRepository = companyTransactionRepository;
 		this.reconciliationPairRepository = reconciliationPairRepository;
+		this.sessionAuditService = sessionAuditService;
 	}
 
 	@Transactional
@@ -123,6 +127,7 @@ public class ConciliacionMatchingService {
 		session.setAmountTolerance(tol);
 		session.setDateToleranceDays(dateToleranceDays);
 		sessionRepository.save(session);
+		sessionAuditService.append(sessionId, SessionAuditEventType.RECONCILE, null);
 
 		int autoCreated = newAutoPairs.size();
 		long unmatchedBank = banks.size() - usedBankIds.size();

@@ -22,6 +22,7 @@ import type {
   ParDto,
   PairKind,
   PendingCommentDto,
+  SessionAuditEntry,
   SessionClosingInfo,
   SessionDetail,
   SessionSummary,
@@ -49,7 +50,6 @@ import {
   formatSessionListWhen,
   formatToleranceInputDisplay,
   sessionStatusLabel,
-  shortFileLabel,
   statusPanelClass,
 } from './utils/format'
 import { parseBalanceInput, parseTransactionId } from './utils/parse'
@@ -1939,6 +1939,96 @@ function PairCommentPanel({
   )
 }
 
+function SessionActivityModal({
+  sessionId,
+  entries,
+  loading,
+  error,
+  onClose,
+}: {
+  sessionId: number
+  entries: SessionAuditEntry[]
+  loading: boolean
+  error: string | null
+  onClose: () => void
+}) {
+  useEffect(() => {
+    function onKey(ev: KeyboardEvent) {
+      if (ev.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  return (
+    <div className="comment-modal-backdrop session-activity-backdrop" role="presentation" onClick={onClose}>
+      <div
+        className="comment-modal session-activity-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="session-activity-title"
+        onClick={(ev) => ev.stopPropagation()}
+      >
+        <header className="comment-modal-head session-activity-head">
+          <div className="session-activity-head-block">
+            <p className="session-activity-kicker">Historial de auditoría</p>
+            <h3 id="session-activity-title" className="session-activity-title">
+              Actividad de la sesión{' '}
+              <span className="session-activity-id-chip" title={`ID ${sessionId}`}>
+                #{sessionId}
+              </span>
+            </h3>
+          </div>
+          <button type="button" className="comment-modal-close session-activity-close" onClick={onClose} aria-label="Cerrar">
+            ×
+          </button>
+        </header>
+        <p className="session-activity-hint">
+          Importación, apertura del detalle, conciliación, saldos y cierre — quién y cuándo.
+        </p>
+        {loading && (
+          <div className="session-activity-state session-activity-state--loading" aria-busy="true">
+            <span className="session-activity-spinner" aria-hidden />
+            Cargando eventos…
+          </div>
+        )}
+        {error && (
+          <div className="session-activity-state session-activity-state--error">
+            <p className="msg err session-activity-err">{error}</p>
+          </div>
+        )}
+        {!loading && !error && entries.length === 0 && (
+          <div className="session-activity-state session-activity-state--empty">
+            <p className="session-activity-empty-text">No hay eventos registrados para esta sesión.</p>
+          </div>
+        )}
+        {!loading && !error && entries.length > 0 && (
+          <ul className="session-activity-list">
+            {entries.map((e) => (
+              <li key={e.id} className="session-activity-item" data-event={e.eventType}>
+                <div className="session-activity-card">
+                  <div className="session-activity-card-top">
+                    <span className="session-activity-label">{e.eventLabel}</span>
+                    <time className="session-activity-time" dateTime={e.createdAt}>
+                      {formatSessionListWhen(e.createdAt)}
+                    </time>
+                  </div>
+                  <div className="session-activity-user-row">
+                    <span className="session-activity-user">{formatCommentAuthor(e.username)}</span>
+                  </div>
+                  {e.detail != null && e.detail.trim() !== '' && (
+                    <p className="session-activity-detail">{e.detail}</p>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function PendingCommentsModal({
   sessionId,
   target,
@@ -2507,6 +2597,11 @@ export default function ConciliacionPage() {
   const [exportLoading, setExportLoading] = useState(false)
   const [exportError, setExportError] = useState<string | null>(null)
 
+  const [activityModalSessionId, setActivityModalSessionId] = useState<number | null>(null)
+  const [activityEntries, setActivityEntries] = useState<SessionAuditEntry[]>([])
+  const [activityLoading, setActivityLoading] = useState(false)
+  const [activityError, setActivityError] = useState<string | null>(null)
+
   const [detailLayout, setDetailLayout] = useState<'classic' | 'compare' | 'complete'>('compare')
   const [compareFilter, setCompareFilter] = useState<CompareFilterKind>('all')
   const [compareDateFrom, setCompareDateFrom] = useState('')
@@ -2649,6 +2744,29 @@ export default function ConciliacionPage() {
     }
   }, [])
 
+  const closeActivityModal = useCallback(() => {
+    setActivityModalSessionId(null)
+    setActivityEntries([])
+    setActivityError(null)
+  }, [])
+
+  const openSessionActivity = useCallback(async (sessionId: number) => {
+    setActivityModalSessionId(sessionId)
+    setActivityLoading(true)
+    setActivityError(null)
+    setActivityEntries([])
+    try {
+      const r = await apiFetch(`/api/v1/conciliacion/sessions/${sessionId}/activity`)
+      if (!r.ok) throw new Error(await parseError(r))
+      const data = (await r.json()) as SessionAuditEntry[]
+      setActivityEntries(Array.isArray(data) ? data : [])
+    } catch (e) {
+      setActivityError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setActivityLoading(false)
+    }
+  }, [])
+
   const loadSessionListPage = useCallback(async (page: number) => {
     setSessionsError(null)
     try {
@@ -2668,8 +2786,9 @@ export default function ConciliacionPage() {
     }
   }, [])
 
-  const loadDetail = useCallback(async (id: number, options?: { soft?: boolean }) => {
+  const loadDetail = useCallback(async (id: number, options?: { soft?: boolean; opening?: boolean }) => {
     const soft = options?.soft === true
+    const opening = options?.opening === true
     if (!soft) {
       setDetailLoading(true)
       setDetailError(null)
@@ -2677,7 +2796,8 @@ export default function ConciliacionPage() {
       setConciliarError(null)
     }
     try {
-      const r = await apiFetch(`/api/v1/conciliacion/sessions/${id}`)
+      const q = !soft && opening ? '?recordAccess=true' : ''
+      const r = await apiFetch(`/api/v1/conciliacion/sessions/${id}${q}`)
       if (!r.ok) throw new Error(await parseError(r))
       setDetail((await r.json()) as SessionDetail)
       if (soft) setDetailError(null)
@@ -2702,7 +2822,7 @@ export default function ConciliacionPage() {
 
   useEffect(() => {
     if (selectedId != null) {
-      void loadDetail(selectedId)
+      void loadDetail(selectedId, { opening: true })
     } else {
       setDetail(null)
     }
@@ -2942,11 +3062,7 @@ export default function ConciliacionPage() {
   }
 
   return (
-    <div
-      className={
-        selectedId != null ? 'app app--wide-detail' : 'app'
-      }
-    >
+    <div className="app">
       <header className="app-header">
         <h1>Conciliación bancaria</h1>
         <p className="subtitle">
@@ -2956,24 +3072,30 @@ export default function ConciliacionPage() {
 
       <main className="app-main">
         <section className="card card--history">
-          <h2>Historial de sesiones</h2>
-          <p className="hint history-hint">
-            Abrí una sesión para ver el mismo detalle que tras importar: comparativa, vista completa,
-            tablas clásicas y exportación Excel.
-          </p>
-          <div className="history-toolbar">
-            <button
-              type="button"
-              className="btn-secondary"
-              onClick={() => void loadSessionListPage(sessionListPage)}
-            >
-              Actualizar
-            </button>
-            <span className="history-toolbar-meta">
-              {sessionListTotalElements === 1
-                ? '1 sesión'
-                : `${sessionListTotalElements} sesiones`}
-            </span>
+          <div className="history-card-head">
+            <div className="history-card-head-text">
+              <h2 className="history-card-title">Sesiones de conciliación</h2>
+              <p className="hint history-hint">
+                Listado de las importaciones guardadas. Elegí <strong>Abrir</strong> para el detalle
+                (comparativa, vistas y cierre), <strong>Actividad</strong> para ver quién hizo qué y{' '}
+                <strong>Excel</strong> para exportar.
+              </p>
+            </div>
+            <div className="history-card-actions">
+              <span className="history-toolbar-meta" aria-live="polite">
+                {sessionListTotalElements === 1
+                  ? '1 sesión'
+                  : `${sessionListTotalElements} sesiones`}
+              </span>
+              <button
+                type="button"
+                className="btn-secondary history-refresh-btn"
+                title="Volver a cargar el listado desde el servidor"
+                onClick={() => void loadSessionListPage(sessionListPage)}
+              >
+                Actualizar listado
+              </button>
+            </div>
           </div>
           {sessionsError && <p className="msg err">{sessionsError}</p>}
           {exportError && selectedId == null && (
@@ -3014,16 +3136,26 @@ export default function ConciliacionPage() {
                       <td className="cell-nowrap">{formatSessionListWhen(s.createdAt)}</td>
                       <td className="cell-mono">{s.id}</td>
                       <td className="history-file" title={s.sourceBankFileName ?? undefined}>
-                        {shortFileLabel(s.sourceBankFileName)}
+                        {s.sourceBankFileName != null && String(s.sourceBankFileName).trim() !== ''
+                          ? s.sourceBankFileName
+                          : '—'}
                       </td>
                       <td className="history-file" title={s.sourceCompanyFileName ?? undefined}>
-                        {shortFileLabel(s.sourceCompanyFileName)}
+                        {s.sourceCompanyFileName != null && String(s.sourceCompanyFileName).trim() !== ''
+                          ? s.sourceCompanyFileName
+                          : '—'}
                       </td>
                       <td className="cell-num">
                         {s.bankRowCount} / {s.companyRowCount}
                       </td>
                       <td className="cell-num">{s.matchedPairs}</td>
-                      <td>{sessionStatusLabel(s.status)}</td>
+                      <td>
+                        <span
+                          className={`session-status-pill session-status-pill--${s.status.toLowerCase()} history-session-status-pill`}
+                        >
+                          {sessionStatusLabel(s.status)}
+                        </span>
+                      </td>
                       <td>
                         <div className="history-actions">
                           <button
@@ -3039,6 +3171,14 @@ export default function ConciliacionPage() {
                             }}
                           >
                             Abrir
+                          </button>
+                          <button
+                            type="button"
+                            className="btn-link history-audit-btn"
+                            title="Ver actividad de la sesión"
+                            onClick={() => void openSessionActivity(s.id)}
+                          >
+                            Actividad
                           </button>
                           <button
                             type="button"
@@ -3911,8 +4051,14 @@ export default function ConciliacionPage() {
                             <th>Importe empresa</th>
                             <th>Fecha banco</th>
                             <th>Fecha empresa</th>
-                            <th>Clasif.</th>
-                            <th></th>
+                            <th className="mov-clasif-th">Clasif.</th>
+                            <th className="mov-notes-th" scope="col" aria-label="Comentarios del par">
+                              <ConversationBubbleIcon className="comment-thread-svg comment-thread-svg--th" />
+                            </th>
+                            <th className="mov-notes-th" scope="col" aria-label="Adjuntos del par">
+                              <PaperclipIcon className="comment-thread-svg comment-thread-svg--th" />
+                            </th>
+                            <th scope="col" aria-label="Quitar vínculo manual"></th>
                           </tr>
                         </thead>
                         <tbody>
@@ -3933,6 +4079,22 @@ export default function ConciliacionPage() {
                                     disabled={classificationReadOnly}
                                     ariaLabel="Clasificación del par conciliado"
                                     onCommit={(v) => void handleSetPairClassification(p.pairId, v)}
+                                  />
+                                </td>
+                                <td className="mov-notes-td">
+                                  <PendingConversationButton
+                                    commentCount={p.pairCommentCount ?? 0}
+                                    onClick={() =>
+                                      setCommentTarget({ kind: 'pair', pairId: p.pairId })
+                                    }
+                                  />
+                                </td>
+                                <td className="mov-notes-td">
+                                  <PendingAttachmentButton
+                                    attachmentCount={p.pairAttachmentCount ?? 0}
+                                    onClick={() =>
+                                      setAttachmentTarget({ kind: 'pair', pairId: p.pairId })
+                                    }
                                   />
                                 </td>
                                 <td>
@@ -4046,6 +4208,15 @@ export default function ConciliacionPage() {
           )}
         </section>
       </main>
+      {activityModalSessionId != null && (
+        <SessionActivityModal
+          sessionId={activityModalSessionId}
+          entries={activityEntries}
+          loading={activityLoading}
+          error={activityError}
+          onClose={closeActivityModal}
+        />
+      )}
       {selectedId != null && (
         <>
           <PendingCommentsModal

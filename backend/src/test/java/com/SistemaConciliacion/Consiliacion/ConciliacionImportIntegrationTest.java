@@ -116,6 +116,20 @@ class ConciliacionImportIntegrationTest {
 				.andExpect(jsonPath("$.session.openingBankBalance").value(1000.50))
 				.andExpect(jsonPath("$.session.amountTolerance").value(0.01))
 				.andExpect(jsonPath("$.session.dateToleranceDays").value(5));
+
+		mockMvc.perform(get("/api/v1/conciliacion/sessions/{id}", sessionId).param("recordAccess", "true")
+				.header(HttpHeaders.AUTHORIZATION, auth))
+				.andExpect(status().isOk());
+
+		mockMvc.perform(get("/api/v1/conciliacion/sessions/{id}/activity", sessionId)
+				.header(HttpHeaders.AUTHORIZATION, auth))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$[0].eventType").value("IMPORT"))
+				.andExpect(jsonPath("$[0].username").value(IT_USER))
+				.andExpect(jsonPath("$[1].eventType").value("RECONCILE"))
+				.andExpect(jsonPath("$[2].eventType").value("SAVE_BALANCES"))
+				.andExpect(jsonPath("$[3].eventType").value("VIEW_DETAIL"))
+				.andExpect(jsonPath("$[3].username").value(IT_USER));
 	}
 
 	@Test

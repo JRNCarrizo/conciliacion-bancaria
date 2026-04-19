@@ -36,6 +36,7 @@ import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.PendingM
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.ReconciliationPair;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.ReconciliationPairComment;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.ReconciliationSession;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.SessionAuditEventType;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.SessionStatus;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.repository.BankTransactionRepository;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.repository.CompanyTransactionRepository;
@@ -59,6 +60,7 @@ public class ConciliacionSessionService {
 	private final MovementAttachmentRepository movementAttachmentRepository;
 	private final PairAttachmentRepository pairAttachmentRepository;
 	private final ReconciliationPairCommentRepository reconciliationPairCommentRepository;
+	private final SessionAuditService sessionAuditService;
 
 	public ConciliacionSessionService(ReconciliationSessionRepository sessionRepository,
 			BankTransactionRepository bankTransactionRepository,
@@ -67,7 +69,8 @@ public class ConciliacionSessionService {
 			PendingMovementCommentRepository pendingMovementCommentRepository,
 			MovementAttachmentRepository movementAttachmentRepository,
 			PairAttachmentRepository pairAttachmentRepository,
-			ReconciliationPairCommentRepository reconciliationPairCommentRepository) {
+			ReconciliationPairCommentRepository reconciliationPairCommentRepository,
+			SessionAuditService sessionAuditService) {
 		this.sessionRepository = sessionRepository;
 		this.bankTransactionRepository = bankTransactionRepository;
 		this.companyTransactionRepository = companyTransactionRepository;
@@ -76,6 +79,7 @@ public class ConciliacionSessionService {
 		this.movementAttachmentRepository = movementAttachmentRepository;
 		this.pairAttachmentRepository = pairAttachmentRepository;
 		this.reconciliationPairCommentRepository = reconciliationPairCommentRepository;
+		this.sessionAuditService = sessionAuditService;
 	}
 
 	@Transactional(readOnly = true)
@@ -94,6 +98,11 @@ public class ConciliacionSessionService {
 
 	@Transactional(readOnly = true)
 	public SessionDetailDto getSessionDetail(long sessionId) {
+		return getSessionDetail(sessionId, false);
+	}
+
+	@Transactional(readOnly = true)
+	public SessionDetailDto getSessionDetail(long sessionId, boolean recordAccess) {
 		ReconciliationSession s = sessionRepository.findById(sessionId)
 				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sesión no encontrada"));
 		List<BankTransaction> banks = bankTransactionRepository.findBySession_IdOrderByTxDateAscIdAsc(sessionId);
@@ -173,6 +182,10 @@ public class ConciliacionSessionService {
 		ConciliacionStatsDto stats = buildStats(s, banks, companies, pairs, matchedBankIds, matchedCompanyIds,
 				gapThreshold);
 
+		if (recordAccess) {
+			sessionAuditService.recordDetailAccess(sessionId);
+		}
+
 		return new SessionDetailDto(toHeader(s), bankDtos, companyDtos, unmatchedBank, unmatchedCompany, parDtos,
 				stats);
 	}
@@ -186,6 +199,7 @@ public class ConciliacionSessionService {
 		}
 		s.setStatus(SessionStatus.CLOSED);
 		sessionRepository.save(s);
+		sessionAuditService.append(sessionId, SessionAuditEventType.CLOSE_SESSION, null);
 		return toHeader(s);
 	}
 
@@ -202,6 +216,7 @@ public class ConciliacionSessionService {
 		s.setOpeningCompanyBalance(dto.openingCompanyBalance());
 		s.setClosingCompanyBalance(dto.closingCompanyBalance());
 		sessionRepository.save(s);
+		sessionAuditService.append(sessionId, SessionAuditEventType.SAVE_BALANCES, null);
 		return toHeader(s);
 	}
 
