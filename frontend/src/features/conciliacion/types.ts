@@ -103,6 +103,8 @@ export type MovementAttachmentDto = {
   contentType: string | null
   sizeBytes: number
   createdAt: string
+  /** Usuario autenticado que subió el archivo (null en registros antiguos). */
+  createdByUsername?: string | null
 }
 
 /** Comentarios: un movimiento o conversación banco + empresa en un par. */
@@ -119,6 +121,8 @@ export type PendingCommentDto = {
   id: number
   body: string
   createdAt: string
+  /** Usuario autenticado que escribió el mensaje (null en registros antiguos). */
+  createdByUsername?: string | null
 }
 
 /**

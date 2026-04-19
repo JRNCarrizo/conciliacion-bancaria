@@ -58,6 +58,12 @@ export function formatCommentWhen(iso: string): string {
   }
 }
 
+/** Usuario que escribió el mensaje o subió el adjunto; em dash si no hay dato (histórico). */
+export function formatCommentAuthor(username: string | null | undefined): string {
+  if (username != null && String(username).trim() !== '') return String(username).trim()
+  return '—'
+}
+
 export function sessionStatusLabel(code: string): string {
   return SESSION_STATUS_LABEL[code] ?? code
 }

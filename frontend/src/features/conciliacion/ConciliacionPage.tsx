@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
 import './conciliacion.css'
 import {
   DEFAULT_IMPORT_BANK_LAYOUT_EXCEL,
@@ -27,6 +26,13 @@ import type {
   SessionDetail,
   SessionSummary,
 } from './types'
+import { apiFetch } from '../../api/client'
+import { useAuth } from '../../auth/AuthContext'
+import {
+  downloadAuthenticatedFile,
+  openAuthenticatedFileInNewTab,
+  useAuthenticatedBlobUrl,
+} from './api/authenticatedBlob'
 import { parseError } from './api/http'
 import { rowMatchesClassification, rowMatchesSearch } from './utils/compareSearch'
 import {
@@ -36,6 +42,7 @@ import {
 } from './utils/effectivePairKind'
 import {
   formatAmount,
+  formatCommentAuthor,
   formatCommentWhen,
   formatDisplayDate,
   formatPct,
@@ -530,7 +537,7 @@ function SessionBalancesForm({
     setSaving(true)
     setErr(null)
     try {
-      const r = await fetch(`/api/v1/conciliacion/sessions/${session.id}/balances`, {
+      const r = await apiFetch(`/api/v1/conciliacion/sessions/${session.id}/balances`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1263,16 +1270,18 @@ function pairAttachmentFileUrl(sessionId: number, pairId: number, attachmentId: 
   return `/api/v1/conciliacion/sessions/${sessionId}/pares/${pairId}/adjuntos/${attachmentId}/archivo`
 }
 
-/** Vista ampliada encima del modal de adjuntos; Escape o clic fuera cierra. */
+/** Vista ampliada encima del modal de adjuntos; Escape o clic fuera cierra. La imagen se carga con Bearer (blob). */
 function ImagePreviewLightbox({
-  url,
+  apiPath,
   filename,
   onClose,
 }: {
-  url: string
+  apiPath: string
   filename: string
   onClose: () => void
 }) {
+  const { blobUrl, loading, error } = useAuthenticatedBlobUrl(apiPath)
+
   useEffect(() => {
     function onKey(ev: KeyboardEvent) {
       if (ev.key === 'Escape') onClose()
@@ -1298,22 +1307,47 @@ function ImagePreviewLightbox({
           ×
         </button>
         <div className="image-lightbox-img-wrap">
-          <img src={url} alt={filename} className="image-lightbox-img" />
+          {loading && <p className="msg subtle">Cargando imagen…</p>}
+          {error && <p className="msg err">{error}</p>}
+          {!loading && !error && blobUrl ? (
+            <img src={blobUrl} alt={filename} className="image-lightbox-img" />
+          ) : null}
         </div>
         <div className="image-lightbox-footer">
           <span className="image-lightbox-filename">{filename}</span>
-          <a
-            className="btn-link image-lightbox-download"
-            href={url}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Abrir o descargar archivo
-          </a>
+          <div className="image-lightbox-actions">
+            <button
+              type="button"
+              className="btn-link image-lightbox-download"
+              onClick={() => void downloadAuthenticatedFile(apiPath, filename)}
+            >
+              Descargar
+            </button>
+            <button
+              type="button"
+              className="btn-link image-lightbox-download"
+              onClick={() =>
+                void openAuthenticatedFileInNewTab(apiPath).catch(() => {
+                  /* popup bloqueado u otro error */
+                })
+              }
+            >
+              Abrir en pestaña nueva
+            </button>
+          </div>
         </div>
       </div>
     </div>
   )
+}
+
+function AttachmentImageThumb({ path, title }: { path: string; title: string }) {
+  const { blobUrl, loading, error } = useAuthenticatedBlobUrl(path)
+  if (error) return <p className="msg err subtle attachment-preview-err">{error}</p>
+  if (loading || !blobUrl) {
+    return <div className="attachment-preview-placeholder">Cargando vista previa…</div>
+  }
+  return <img className="attachment-preview-img" src={blobUrl} alt="" loading="lazy" title={title} />
 }
 
 type PendingAttachmentSidePanelProps =
@@ -1340,7 +1374,7 @@ function PendingAttachmentSidePanel(props: PendingAttachmentSidePanelProps) {
   const [uploading, setUploading] = useState(false)
   const [fetchError, setFetchError] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
-  const [imageLightbox, setImageLightbox] = useState<{ url: string; filename: string } | null>(null)
+  const [imageLightbox, setImageLightbox] = useState<{ apiPath: string; filename: string } | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const listUrl =
@@ -1355,7 +1389,7 @@ function PendingAttachmentSidePanel(props: PendingAttachmentSidePanelProps) {
       setFetchError(null)
       setActionError(null)
       try {
-        const r = await fetch(listUrl)
+        const r = await apiFetch(listUrl)
         if (!r.ok) throw new Error(await parseError(r))
         const data = (await r.json()) as MovementAttachmentDto[]
         if (!cancelled) setItems(data)
@@ -1380,7 +1414,7 @@ function PendingAttachmentSidePanel(props: PendingAttachmentSidePanelProps) {
     try {
       const fd = new FormData()
       fd.append('file', file)
-      const r = await fetch(listUrl, {
+      const r = await apiFetch(listUrl, {
         method: 'POST',
         body: fd,
       })
@@ -1399,7 +1433,7 @@ function PendingAttachmentSidePanel(props: PendingAttachmentSidePanelProps) {
     if (props.sessionClosed) return
     setActionError(null)
     try {
-      const r = await fetch(`${listUrl}/${id}`, { method: 'DELETE' })
+      const r = await apiFetch(`${listUrl}/${id}`, { method: 'DELETE' })
       if (!r.ok) throw new Error(await parseError(r))
       setItems((prev) => prev.filter((x) => x.id !== id))
       props.onAfterChange()
@@ -1449,13 +1483,19 @@ function PendingAttachmentSidePanel(props: PendingAttachmentSidePanelProps) {
                     <div className="attachment-row-head">
                       <a
                         className="attachment-download-link"
-                        href={fileUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
+                        href="#"
+                        onClick={(e) => {
+                          e.preventDefault()
+                          void downloadAuthenticatedFile(fileUrl, a.originalFilename).catch((err) => {
+                            setActionError(err instanceof Error ? err.message : String(err))
+                          })
+                        }}
                       >
                         {a.originalFilename}
                       </a>
                       <span className="attachment-meta">
+                        <span className="attachment-meta-user">{formatCommentAuthor(a.createdByUsername)}</span>
+                        {' · '}
                         {formatAttachmentSize(a.sizeBytes)} · {formatCommentWhen(a.createdAt)}
                       </span>
                     </div>
@@ -1475,9 +1515,9 @@ function PendingAttachmentSidePanel(props: PendingAttachmentSidePanelProps) {
                       className="attachment-preview-trigger"
                       title="Ver en grande"
                       aria-label={`Ver en grande: ${a.originalFilename}`}
-                      onClick={() => setImageLightbox({ url: fileUrl, filename: a.originalFilename })}
+                      onClick={() => setImageLightbox({ apiPath: fileUrl, filename: a.originalFilename })}
                     >
-                      <img className="attachment-preview-img" src={fileUrl} alt="" loading="lazy" />
+                      <AttachmentImageThumb path={fileUrl} title={`Ver en grande: ${a.originalFilename}`} />
                     </button>
                   )}
                 </article>
@@ -1498,7 +1538,7 @@ function PendingAttachmentSidePanel(props: PendingAttachmentSidePanelProps) {
       </div>
       {imageLightbox ? (
         <ImagePreviewLightbox
-          url={imageLightbox.url}
+          apiPath={imageLightbox.apiPath}
           filename={imageLightbox.filename}
           onClose={() => setImageLightbox(null)}
         />
@@ -1657,7 +1697,7 @@ function PendingCommentSidePanel({
       setPostError(null)
       try {
         const path = side === 'bank' ? 'banco' : 'empresa'
-        const r = await fetch(
+        const r = await apiFetch(
           `/api/v1/conciliacion/sessions/${sessionId}/pending/${path}/${txId}/comentarios`,
         )
         if (!r.ok) throw new Error(await parseError(r))
@@ -1689,7 +1729,7 @@ function PendingCommentSidePanel({
     setPostError(null)
     try {
       const path = side === 'bank' ? 'banco' : 'empresa'
-      const r = await fetch(
+      const r = await apiFetch(
         `/api/v1/conciliacion/sessions/${sessionId}/pending/${path}/${txId}/comentarios`,
         {
           method: 'POST',
@@ -1728,9 +1768,12 @@ function PendingCommentSidePanel({
           !fetchError &&
           items.map((c) => (
             <article key={c.id} className="comment-bubble">
-              <time className="comment-bubble-time" dateTime={c.createdAt}>
-                {formatCommentWhen(c.createdAt)}
-              </time>
+              <div className="comment-bubble-meta">
+                <span className="comment-bubble-author">{formatCommentAuthor(c.createdByUsername)}</span>
+                <time className="comment-bubble-time" dateTime={c.createdAt}>
+                  {formatCommentWhen(c.createdAt)}
+                </time>
+              </div>
               <p className="comment-bubble-body">{c.body}</p>
             </article>
           ))}
@@ -1800,7 +1843,7 @@ function PairCommentPanel({
       setFetchError(null)
       setPostError(null)
       try {
-        const r = await fetch(`/api/v1/conciliacion/sessions/${sessionId}/pairs/${pairId}/comentarios`)
+        const r = await apiFetch(`/api/v1/conciliacion/sessions/${sessionId}/pairs/${pairId}/comentarios`)
         if (!r.ok) throw new Error(await parseError(r))
         const data = (await r.json()) as PendingCommentDto[]
         if (!cancelled) setItems(data)
@@ -1829,7 +1872,7 @@ function PairCommentPanel({
     setPosting(true)
     setPostError(null)
     try {
-      const r = await fetch(`/api/v1/conciliacion/sessions/${sessionId}/pairs/${pairId}/comentarios`, {
+      const r = await apiFetch(`/api/v1/conciliacion/sessions/${sessionId}/pairs/${pairId}/comentarios`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text }),
@@ -1858,9 +1901,12 @@ function PairCommentPanel({
           !fetchError &&
           items.map((c) => (
             <article key={c.id} className="comment-bubble">
-              <time className="comment-bubble-time" dateTime={c.createdAt}>
-                {formatCommentWhen(c.createdAt)}
-              </time>
+              <div className="comment-bubble-meta">
+                <span className="comment-bubble-author">{formatCommentAuthor(c.createdByUsername)}</span>
+                <time className="comment-bubble-time" dateTime={c.createdAt}>
+                  {formatCommentWhen(c.createdAt)}
+                </time>
+              </div>
               <p className="comment-bubble-body">{c.body}</p>
             </article>
           ))}
@@ -1995,6 +2041,7 @@ function ComparisonTable({
   allRowsCount,
   selectedId,
   sessionClosed,
+  classificationReadOnly,
   sessionAmountTolerance,
   classificationSuggestions,
   onDeleteManual,
@@ -2009,6 +2056,8 @@ function ComparisonTable({
   selectedId: number | null
   /** Sesión cerrada: oculta «Quitar» y bloquea clasificación en pendientes. */
   sessionClosed: boolean
+  /** Sesión cerrada o rol solo consulta: inputs de clasificación deshabilitados. */
+  classificationReadOnly: boolean
   /** Tolerancia de importe guardada en sesión (0 es válido). */
   sessionAmountTolerance: number | null | undefined
   /** Clasificaciones ya usadas en la sesión (sugerencias al escribir). */
@@ -2103,7 +2152,7 @@ function ComparisonTable({
                       <ClassificationCombo
                         value={pair.classification ?? undefined}
                         suggestions={classificationSuggestions}
-                        disabled={sessionClosed}
+                        disabled={classificationReadOnly}
                         ariaLabel="Clasificación del par conciliado"
                         onCommit={(v) => onSetPairClassification(pair.pairId, v)}
                       />
@@ -2182,7 +2231,7 @@ function ComparisonTable({
                       <ClassificationCombo
                         value={m.pendingClassification}
                         suggestions={classificationSuggestions}
-                        disabled={sessionClosed}
+                        disabled={classificationReadOnly}
                         ariaLabel="Clasificación pendiente banco"
                         onCommit={(v) => onSetClassification('bank', m.id, v)}
                       />
@@ -2244,7 +2293,7 @@ function ComparisonTable({
                     <ClassificationCombo
                       value={m.pendingClassification}
                       suggestions={classificationSuggestions}
-                      disabled={sessionClosed}
+                      disabled={classificationReadOnly}
                       ariaLabel="Clasificación pendiente empresa"
                       onCommit={(v) => onSetClassification('company', m.id, v)}
                     />
@@ -2325,7 +2374,7 @@ function MovimientosTable({
   classificationSuggestions: readonly string[]
   /** Pendientes: columna «Clasif.» con el mismo criterio que en comparativa / vista completa. */
   onClassificationChange?: (txId: number, classification: string) => void
-  /** Sesión cerrada: selector deshabilitado. */
+  /** Sesión cerrada o rol solo consulta: selector deshabilitado. */
   classificationLocked?: boolean
   /** Conversación archivada en el pendiente. */
   onOpenPendingComments?: (txId: number) => void
@@ -2416,6 +2465,7 @@ function MovimientosTable({
 }
 
 export default function ConciliacionPage() {
+  const { user } = useAuth()
   const [bankFile, setBankFile] = useState<File | null>(null)
   const [companyFile, setCompanyFile] = useState<File | null>(null)
   const [useCustomImportLayout, setUseCustomImportLayout] = useState(false)
@@ -2571,6 +2621,8 @@ export default function ConciliacionPage() {
   const detailMatchesSelection =
     selectedId != null && detail != null && detail.session.id === selectedId
   const sessionClosed = detailMatchesSelection && detail.session.status === 'CLOSED'
+  /** Consulta: solo lectura en clasificación (además de sesión cerrada). */
+  const classificationReadOnly = sessionClosed || user?.role === 'CONSULTA'
   const reconcileLocked =
     detailLoading || (detailMatchesSelection && detail.session.status === 'CLOSED')
 
@@ -2578,7 +2630,7 @@ export default function ConciliacionPage() {
     setExportError(null)
     setExportLoading(true)
     try {
-      const r = await fetch(`/api/v1/conciliacion/sessions/${sessionId}/export.xlsx`)
+      const r = await apiFetch(`/api/v1/conciliacion/sessions/${sessionId}/export.xlsx`)
       if (!r.ok) throw new Error(await parseError(r))
       const blob = await r.blob()
       const url = URL.createObjectURL(blob)
@@ -2604,7 +2656,7 @@ export default function ConciliacionPage() {
         page: String(page),
         size: String(SESSION_HISTORY_PAGE_SIZE),
       })
-      const r = await fetch(`/api/v1/conciliacion/sessions?${q}`)
+      const r = await apiFetch(`/api/v1/conciliacion/sessions?${q}`)
       if (!r.ok) throw new Error(await parseError(r))
       const data = (await r.json()) as PageSessions
       setSessions(data.content ?? [])
@@ -2625,7 +2677,7 @@ export default function ConciliacionPage() {
       setConciliarError(null)
     }
     try {
-      const r = await fetch(`/api/v1/conciliacion/sessions/${id}`)
+      const r = await apiFetch(`/api/v1/conciliacion/sessions/${id}`)
       if (!r.ok) throw new Error(await parseError(r))
       setDetail((await r.json()) as SessionDetail)
       if (soft) setDetailError(null)
@@ -2704,7 +2756,7 @@ export default function ConciliacionPage() {
           }),
         )
       }
-      const r = await fetch('/api/v1/conciliacion/import', {
+      const r = await apiFetch('/api/v1/conciliacion/import', {
         method: 'POST',
         body: fd,
       })
@@ -2739,7 +2791,7 @@ export default function ConciliacionPage() {
     setManualError(null)
     const y = window.scrollY
     try {
-      const r = await fetch(`/api/v1/conciliacion/sessions/${selectedId}/pares`, {
+      const r = await apiFetch(`/api/v1/conciliacion/sessions/${selectedId}/pares`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -2765,7 +2817,7 @@ export default function ConciliacionPage() {
     if (!window.confirm('¿Quitar este vínculo manual?')) return
     const y = window.scrollY
     try {
-      const r = await fetch(
+      const r = await apiFetch(
         `/api/v1/conciliacion/sessions/${selectedId}/pares/${pairId}`,
         { method: 'DELETE' },
       )
@@ -2790,7 +2842,7 @@ export default function ConciliacionPage() {
     setCloseSessionLoading(true)
     setDetailError(null)
     try {
-      const r = await fetch(`/api/v1/conciliacion/sessions/${selectedId}/cierre`, {
+      const r = await apiFetch(`/api/v1/conciliacion/sessions/${selectedId}/cierre`, {
         method: 'POST',
       })
       if (!r.ok) throw new Error(await parseError(r))
@@ -2820,7 +2872,7 @@ export default function ConciliacionPage() {
           parsedTol != null && parsedTol >= 0 ? parsedTol : amountTolerance,
         ),
       })
-      const r = await fetch(
+      const r = await apiFetch(
         `/api/v1/conciliacion/sessions/${selectedId}/conciliar?${q.toString()}`,
         { method: 'POST' },
       )
@@ -2849,7 +2901,7 @@ export default function ConciliacionPage() {
         ? `pending/banco/${txId}/clasificacion`
         : `pending/empresa/${txId}/clasificacion`
     try {
-      const r = await fetch(
+      const r = await apiFetch(
         `/api/v1/conciliacion/sessions/${selectedId}/${sub}`,
         {
           method: 'PUT',
@@ -2871,7 +2923,7 @@ export default function ConciliacionPage() {
     if (selectedId == null) return
     const y = window.scrollY
     try {
-      const r = await fetch(
+      const r = await apiFetch(
         `/api/v1/conciliacion/sessions/${selectedId}/pairs/${pairId}/clasificacion`,
         {
           method: 'PUT',
@@ -2896,11 +2948,6 @@ export default function ConciliacionPage() {
       }
     >
       <header className="app-header">
-        <p className="conciliacion-back-wrap">
-          <Link to="/" className="conciliacion-home-link">
-            ← Inicio
-          </Link>
-        </p>
         <h1>Conciliación bancaria</h1>
         <p className="subtitle">
           Importación, sesiones, conciliación por importe (|Δ| ≤ tolerancia) y fecha más cercana
@@ -3490,6 +3537,12 @@ export default function ConciliacionPage() {
                 </div>
               )}
 
+              {detailMatchesSelection && !detailLoading && user?.role === 'CONSULTA' && !sessionClosed && (
+                <div className="msg subtle session-consulta-hint" role="status">
+                  Perfil solo consulta: la clasificación de movimientos y pares es de solo lectura.
+                </div>
+              )}
+
               <div className="session-detail-run">
                 <div className="session-tolerance-fields">
                   <label className="session-tolerance-field">
@@ -3733,6 +3786,7 @@ export default function ConciliacionPage() {
                     allRowsCount={comparisonRows.length}
                     selectedId={selectedId}
                     sessionClosed={sessionClosed}
+                    classificationReadOnly={classificationReadOnly}
                     sessionAmountTolerance={effectiveSessionAmountTolerance}
                     classificationSuggestions={classificationSuggestions}
                     onDeleteManual={(pairId) => void handleDeleteManualPair(pairId)}
@@ -3783,6 +3837,7 @@ export default function ConciliacionPage() {
                     allRowsCount={comparisonRows.length}
                     selectedId={selectedId}
                     sessionClosed={sessionClosed}
+                    classificationReadOnly={classificationReadOnly}
                     sessionAmountTolerance={effectiveSessionAmountTolerance}
                     classificationSuggestions={classificationSuggestions}
                     onDeleteManual={(pairId) => void handleDeleteManualPair(pairId)}
@@ -3875,7 +3930,7 @@ export default function ConciliacionPage() {
                                   <ClassificationCombo
                                     value={p.classification ?? undefined}
                                     suggestions={classificationSuggestions}
-                                    disabled={sessionClosed}
+                                    disabled={classificationReadOnly}
                                     ariaLabel="Clasificación del par conciliado"
                                     onCommit={(v) => void handleSetPairClassification(p.pairId, v)}
                                   />
@@ -3904,7 +3959,7 @@ export default function ConciliacionPage() {
                     title="Pendientes banco"
                     rows={classicFilteredUnmatchedBank}
                     classificationSuggestions={classificationSuggestions}
-                    classificationLocked={sessionClosed}
+                    classificationLocked={classificationReadOnly}
                     onClassificationChange={(txId, c) =>
                       void handleSetClassification('bank', txId, c)
                     }
@@ -3919,7 +3974,7 @@ export default function ConciliacionPage() {
                     title="Pendientes empresa (plataforma)"
                     rows={classicFilteredUnmatchedCompany}
                     classificationSuggestions={classificationSuggestions}
-                    classificationLocked={sessionClosed}
+                    classificationLocked={classificationReadOnly}
                     onClassificationChange={(txId, c) =>
                       void handleSetClassification('company', txId, c)
                     }

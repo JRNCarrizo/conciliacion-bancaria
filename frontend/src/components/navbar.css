@@ -1,0 +1,203 @@
+.app-navbar {
+  position: sticky;
+  top: 0;
+  z-index: 2000;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--border) 40%, transparent);
+}
+
+.app-navbar-inner {
+  max-width: min(1200px, calc(100vw - 1.5rem));
+  margin: 0 auto;
+  padding: 0.65rem clamp(0.85rem, 2vw, 1.35rem);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.85rem 1.25rem;
+  justify-content: space-between;
+}
+
+.app-navbar-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  text-decoration: none;
+  color: inherit;
+  flex-shrink: 0;
+}
+
+.app-navbar-brand:hover .app-navbar-title {
+  color: var(--accent);
+}
+
+/** Marco para logos rectangulares (PNG); claro: fondo blanco; oscuro: transparente (mismo tono que el navbar). */
+.app-navbar-logo-frame {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.2rem 0.5rem;
+  min-height: 2.5rem;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+html[data-theme='light'] .app-navbar-logo-frame {
+  background: #ffffff;
+  border: 1px solid color-mix(in srgb, var(--border) 55%, #e2e8f0);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+}
+
+html[data-theme='dark'] .app-navbar-logo-frame {
+  /* Sin capa extra: se ve el mismo fondo + blur que .app-navbar. */
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--border) 40%, transparent);
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--border) 25%, transparent);
+}
+
+.app-navbar-logo {
+  width: auto;
+  height: 2rem;
+  max-width: 6.5rem;
+  object-fit: contain;
+  object-position: center;
+  display: block;
+}
+
+.app-navbar-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text-h);
+  line-height: 1.2;
+  max-width: 14rem;
+}
+
+.app-navbar-link {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text);
+  text-decoration: none;
+  padding: 0.35rem 0.55rem;
+  border-radius: 8px;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.app-navbar-link:hover {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--text-h);
+}
+
+.app-navbar-link--cta {
+  color: var(--accent);
+}
+
+.app-navbar-link--muted {
+  font-weight: 500;
+  color: var(--text-h);
+  font-size: 0.84rem;
+}
+
+.app-navbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1rem 1.35rem;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.app-navbar-theme.theme-toggle {
+  flex-shrink: 0;
+}
+
+.app-navbar-session {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.85rem 1.15rem;
+  padding-left: 1.15rem;
+  border-left: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+  min-width: 0;
+}
+
+.app-navbar-guest {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem 0.85rem;
+  padding-left: 1.15rem;
+  border-left: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+}
+
+.app-navbar-user {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 0.12rem;
+  max-width: min(14rem, 42vw);
+  padding: 0.35rem 0.65rem;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 45%, transparent);
+}
+
+.app-navbar-user-name {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-h);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+  line-height: 1.2;
+}
+
+.app-navbar-user-role {
+  font-size: 0.74rem;
+  font-weight: 500;
+  color: var(--text);
+  opacity: 0.92;
+  line-height: 1.2;
+}
+
+.app-navbar-logout {
+  font-size: 0.84rem;
+  padding: 0.45rem 1rem;
+  flex-shrink: 0;
+}
+
+@media (max-width: 720px) {
+  .app-navbar-inner {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .app-navbar-actions {
+    width: 100%;
+    margin-left: 0;
+    justify-content: flex-start;
+    align-items: center;
+    padding-top: 0.6rem;
+    border-top: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+    gap: 0.85rem 1rem;
+  }
+
+  .app-navbar-session,
+  .app-navbar-guest {
+    border-left: none;
+    padding-left: 0;
+    flex: 1 1 auto;
+    min-width: 0;
+    justify-content: space-between;
+  }
+
+  .app-navbar-user {
+    align-items: flex-start;
+    max-width: min(14rem, 55vw);
+  }
+}

@@ -17,6 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
+import com.SistemaConciliacion.Consiliacion.config.SecurityUtils;
 import com.SistemaConciliacion.Consiliacion.config.UploadProperties;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.MovementAttachmentDto;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.PairAttachment;
@@ -51,26 +52,25 @@ public class PairAttachmentService {
 	@Transactional(readOnly = true)
 	public List<MovementAttachmentDto> list(long sessionId, long pairId) {
 		sessionRepository.findById(sessionId)
-				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sesión no encontrada"));
+				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sesi?n no encontrada"));
 		assertPairInSession(sessionId, pairId);
 		return pairAttachmentRepository.findBySession_IdAndPair_IdOrderByCreatedAtAsc(sessionId, pairId).stream()
-				.map(a -> new MovementAttachmentDto(a.getId(), a.getOriginalFilename(), a.getContentType(),
-						a.getSizeBytes(), a.getCreatedAt()))
+				.map(PairAttachmentService::toDto)
 				.toList();
 	}
 
 	@Transactional
 	public MovementAttachmentDto upload(long sessionId, long pairId, MultipartFile file) throws IOException {
 		ReconciliationSession session = sessionRepository.findById(sessionId)
-				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sesión no encontrada"));
+				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sesi?n no encontrada"));
 		if (session.getStatus() == SessionStatus.CLOSED) {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-					"La sesión está cerrada; no se pueden subir archivos.");
+					"La sesi?n est? cerrada; no se pueden subir archivos.");
 		}
 		ReconciliationPair pair = reconciliationPairRepository.findByIdAndSession_Id(pairId, sessionId)
 				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Par no encontrado."));
 		if (file == null || file.isEmpty()) {
-			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Archivo vacío.");
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Archivo vac?o.");
 		}
 		long size = file.getSize();
 		if (size <= 0 || size > MAX_BYTES) {
@@ -85,14 +85,14 @@ public class PairAttachmentService {
 		ext = ext == null ? null : ext.toLowerCase(Locale.ROOT);
 		if (ext == null || !ALLOWED_EXT.contains(ext)) {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-					"Tipo no permitido. Usá PDF o imagen (PNG, JPG, WEBP, GIF).");
+					"Tipo no permitido. Us? PDF o imagen (PNG, JPG, WEBP, GIF).");
 		}
 
 		Path base = basePath();
 		String relative = sessionId + "/pair/" + pairId + "/" + UUID.randomUUID() + "." + ext;
 		Path target = base.resolve(relative).normalize();
 		if (!target.startsWith(base)) {
-			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Ruta inválida.");
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Ruta inv?lida.");
 		}
 		Files.createDirectories(target.getParent());
 		try (InputStream in = file.getInputStream()) {
@@ -107,19 +107,19 @@ public class PairAttachmentService {
 		String ct = file.getContentType();
 		row.setContentType(ct != null && ct.length() <= 128 ? ct : guessContentType(ext));
 		row.setSizeBytes(size);
+		row.setCreatedByUsername(SecurityUtils.currentUsername());
 		pairAttachmentRepository.save(row);
 
-		return new MovementAttachmentDto(row.getId(), row.getOriginalFilename(), row.getContentType(),
-				row.getSizeBytes(), row.getCreatedAt());
+		return toDto(row);
 	}
 
 	@Transactional
 	public void delete(long sessionId, long pairId, long attachmentId) {
 		ReconciliationSession session = sessionRepository.findById(sessionId)
-				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sesión no encontrada"));
+				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sesi?n no encontrada"));
 		if (session.getStatus() == SessionStatus.CLOSED) {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-					"La sesión está cerrada; no se pueden eliminar archivos.");
+					"La sesi?n est? cerrada; no se pueden eliminar archivos.");
 		}
 		PairAttachment a = pairAttachmentRepository
 				.findByIdAndSession_IdAndPair_Id(attachmentId, sessionId, pairId)
@@ -128,7 +128,7 @@ public class PairAttachmentService {
 		Path base = basePath();
 		Path filePath = base.resolve(a.getStoredPath()).normalize();
 		if (!filePath.startsWith(base)) {
-			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Ruta inválida.");
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Ruta inv?lida.");
 		}
 		pairAttachmentRepository.delete(a);
 		try {
@@ -142,14 +142,14 @@ public class PairAttachmentService {
 	@Transactional(readOnly = true)
 	public MovementAttachmentService.ResourceWithMeta loadForDownload(long sessionId, long pairId, long attachmentId) {
 		sessionRepository.findById(sessionId)
-				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sesión no encontrada"));
+				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sesi?n no encontrada"));
 		PairAttachment a = pairAttachmentRepository
 				.findByIdAndSession_IdAndPair_Id(attachmentId, sessionId, pairId)
 				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Adjunto no encontrado."));
 		Path base = basePath();
 		Path filePath = base.resolve(a.getStoredPath()).normalize();
 		if (!filePath.startsWith(base)) {
-			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Ruta inválida.");
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Ruta inv?lida.");
 		}
 		if (!Files.isRegularFile(filePath)) {
 			throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Archivo no encontrado en disco.");
@@ -189,5 +189,10 @@ public class PairAttachmentService {
 			case "gif" -> "image/gif";
 			default -> "application/octet-stream";
 		};
+	}
+
+	private static MovementAttachmentDto toDto(PairAttachment a) {
+		return new MovementAttachmentDto(a.getId(), a.getOriginalFilename(), a.getContentType(), a.getSizeBytes(),
+				a.getCreatedAt(), a.getCreatedByUsername());
 	}
 }

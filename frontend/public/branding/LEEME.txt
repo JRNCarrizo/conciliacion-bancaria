@@ -1,0 +1,10 @@
+Logo de la empresa (conciliación bancaria)
+==========================================
+
+Colocá aquí el archivo de imagen del logo para que aparezca en la barra superior y en el login.
+
+Actualmente el proyecto usa:
+  - Archivo: logo-empresa.png (en esta carpeta)
+  - Constante: BRANDING_LOGO_SRC en frontend/src/branding.ts
+
+Formatos habituales: SVG (escalable), PNG con fondo transparente.

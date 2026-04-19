@@ -29,6 +29,7 @@ import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.http.ContentDisposition;
 
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.ClassificationUpdateDto;
@@ -129,6 +130,7 @@ public class ConciliacionController {
 		return conciliacionSessionService.closeSession(id);
 	}
 
+	@PreAuthorize("hasAnyRole('ADMIN', 'OPERADOR')")
 	@PutMapping(value = "/sessions/{id}/pending/banco/{txId}/clasificacion", consumes = MediaType.APPLICATION_JSON_VALUE)
 	@ResponseStatus(HttpStatus.NO_CONTENT)
 	public void putBankClassification(@PathVariable long id, @PathVariable long txId,
@@ -137,6 +139,7 @@ public class ConciliacionController {
 				body != null ? body : new ClassificationUpdateDto(null));
 	}
 
+	@PreAuthorize("hasAnyRole('ADMIN', 'OPERADOR')")
 	@PutMapping(value = "/sessions/{id}/pending/empresa/{txId}/clasificacion", consumes = MediaType.APPLICATION_JSON_VALUE)
 	@ResponseStatus(HttpStatus.NO_CONTENT)
 	public void putCompanyClassification(@PathVariable long id, @PathVariable long txId,
@@ -146,6 +149,7 @@ public class ConciliacionController {
 	}
 
 	/** Clasificación única del par conciliado (una por fila, no duplicada en cada movimiento). */
+	@PreAuthorize("hasAnyRole('ADMIN', 'OPERADOR')")
 	@PutMapping(value = "/sessions/{id}/pairs/{pairId}/clasificacion", consumes = MediaType.APPLICATION_JSON_VALUE)
 	@ResponseStatus(HttpStatus.NO_CONTENT)
 	public void putPairClassification(@PathVariable long id, @PathVariable long pairId,

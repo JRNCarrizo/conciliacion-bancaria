@@ -1,0 +1,222 @@
+.auth-page {
+  min-height: 60vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1rem;
+}
+
+.auth-page--login {
+  min-height: calc(100svh - 5rem);
+  padding: 2.5rem 1.25rem 2rem;
+  box-sizing: border-box;
+  background:
+    radial-gradient(
+      ellipse 85% 55% at 50% -5%,
+      color-mix(in srgb, var(--accent) 16%, transparent),
+      transparent 58%
+    ),
+    var(--bg);
+}
+
+.auth-page--center {
+  min-height: 50vh;
+}
+
+.auth-card--compact {
+  padding: 1.25rem 1.5rem;
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 420px;
+}
+
+.auth-card--login {
+  max-width: 400px;
+  padding: 2.15rem 1.9rem 1.35rem;
+  border-radius: 16px;
+  border: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
+  background: color-mix(in srgb, var(--surface) 94%, var(--code-bg) 6%);
+  box-shadow:
+    var(--shadow),
+    0 1px 0 color-mix(in srgb, #fff 6%, transparent) inset;
+}
+
+html[data-theme='light'] .auth-card--login {
+  background: color-mix(in srgb, var(--surface) 97%, var(--bg));
+  box-shadow:
+    var(--shadow),
+    0 1px 0 rgba(255, 255, 255, 0.75) inset;
+}
+
+.auth-brand {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 1rem;
+}
+
+.auth-brand--plain {
+  margin-bottom: 1.35rem;
+}
+
+.auth-brand--plain .auth-brand-logo {
+  max-height: 4rem;
+}
+
+.auth-brand-frame {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.65rem 1rem;
+  border-radius: 12px;
+  max-width: min(100%, 20rem);
+}
+
+html[data-theme='light'] .auth-brand-frame {
+  background: #ffffff;
+  border: 1px solid color-mix(in srgb, var(--border) 50%, #e2e8f0);
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
+}
+
+html[data-theme='dark'] .auth-brand-frame {
+  background: color-mix(in srgb, var(--code-bg) 55%, #2a2c38 45%);
+  border: 1px solid color-mix(in srgb, var(--border) 45%, #52525b 55%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 2px 10px rgba(0, 0, 0, 0.4);
+}
+
+.auth-brand-logo {
+  width: auto;
+  height: auto;
+  max-height: 3.75rem;
+  max-width: 100%;
+  object-fit: contain;
+  object-position: center;
+  display: block;
+}
+
+.auth-title {
+  margin: 0 0 0.5rem;
+  font-size: 1.35rem;
+  color: var(--text-h);
+}
+
+.auth-title--center {
+  text-align: center;
+  font-size: 1.55rem;
+  font-weight: 600;
+  letter-spacing: -0.035em;
+  margin: 0 0 1.5rem;
+}
+
+.auth-sub {
+  margin: 0 0 1rem;
+  font-size: 0.92rem;
+  color: var(--text);
+}
+
+.auth-sub--center {
+  text-align: center;
+}
+
+.auth-unavailable-actions {
+  margin: 0.35rem 0 0;
+}
+
+.auth-sub a {
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.auth-sub a:hover {
+  text-decoration: underline;
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.auth-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text-h);
+}
+
+.auth-input {
+  padding: 0.55rem 0.65rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.95rem;
+}
+
+.auth-card--login .auth-input {
+  padding: 0.65rem 0.85rem;
+  border-radius: 10px;
+  border-color: color-mix(in srgb, var(--border) 80%, transparent);
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.auth-card--login .auth-input:focus {
+  outline: none;
+  border-color: var(--accent-border);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+.auth-card--login .auth-form .btn-import {
+  width: 100%;
+  margin-top: 0.5rem;
+  padding: 0.72rem 1rem;
+}
+
+.auth-back {
+  margin: 1.6rem 0 0;
+  padding-top: 1.05rem;
+  border-top: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+  text-align: end;
+  font-size: 0.86rem;
+}
+
+.auth-back a {
+  color: var(--text);
+  font-weight: 500;
+  text-decoration: none;
+  opacity: 0.88;
+  transition:
+    color 0.15s ease,
+    opacity 0.15s ease;
+}
+
+.auth-back a:hover {
+  color: var(--accent);
+  opacity: 1;
+}
+
+.auth-card--login .auth-hint {
+  margin-top: 1.15rem;
+  text-align: center;
+  line-height: 1.45;
+}
+
+.auth-hint {
+  margin: 1rem 0 0;
+  font-size: 0.85rem;
+  color: var(--text);
+}
+
+.auth-hint a {
+  color: var(--accent);
+  font-weight: 600;
+}

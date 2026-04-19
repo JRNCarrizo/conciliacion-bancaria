@@ -19,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.ClassificationUpdateDto;
+import com.SistemaConciliacion.Consiliacion.config.SecurityUtils;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.CommentCreateDto;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.ConciliacionStatsDto;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.MovimientoDto;
@@ -260,7 +261,8 @@ public class ConciliacionSessionService {
 				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sesión no encontrada"));
 		return pendingMovementCommentRepository
 				.findBySession_IdAndMovementSideAndMovementIdOrderByCreatedAtAsc(sessionId, side, txId).stream()
-				.map(c -> new PendingCommentDto(c.getId(), c.getBody(), c.getCreatedAt())).toList();
+				.map(c -> new PendingCommentDto(c.getId(), c.getBody(), c.getCreatedAt(), c.getCreatedByUsername()))
+				.toList();
 	}
 
 	@Transactional
@@ -292,8 +294,9 @@ public class ConciliacionSessionService {
 		c.setMovementId(txId);
 		c.setBody(text);
 		c.setCreatedAt(Instant.now());
+		c.setCreatedByUsername(SecurityUtils.currentUsername());
 		pendingMovementCommentRepository.save(c);
-		return new PendingCommentDto(c.getId(), c.getBody(), c.getCreatedAt());
+		return new PendingCommentDto(c.getId(), c.getBody(), c.getCreatedAt(), c.getCreatedByUsername());
 	}
 
 	@Transactional(readOnly = true)
@@ -303,7 +306,9 @@ public class ConciliacionSessionService {
 		reconciliationPairRepository.findByIdAndSession_Id(pairId, sessionId)
 				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Par no encontrado"));
 		return reconciliationPairCommentRepository.findBySession_IdAndPair_IdOrderByCreatedAtAsc(sessionId, pairId)
-				.stream().map(c -> new PendingCommentDto(c.getId(), c.getBody(), c.getCreatedAt())).toList();
+				.stream()
+				.map(c -> new PendingCommentDto(c.getId(), c.getBody(), c.getCreatedAt(), c.getCreatedByUsername()))
+				.toList();
 	}
 
 	@Transactional
@@ -328,8 +333,9 @@ public class ConciliacionSessionService {
 		c.setPair(pair);
 		c.setBody(text);
 		c.setCreatedAt(Instant.now());
+		c.setCreatedByUsername(SecurityUtils.currentUsername());
 		reconciliationPairCommentRepository.save(c);
-		return new PendingCommentDto(c.getId(), c.getBody(), c.getCreatedAt());
+		return new PendingCommentDto(c.getId(), c.getBody(), c.getCreatedAt(), c.getCreatedByUsername());
 	}
 
 	private static final int MAX_CLASSIFICATION_LEN = 128;

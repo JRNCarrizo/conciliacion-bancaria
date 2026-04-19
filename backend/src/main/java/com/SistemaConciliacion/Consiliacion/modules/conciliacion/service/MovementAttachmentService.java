@@ -17,6 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
+import com.SistemaConciliacion.Consiliacion.config.SecurityUtils;
 import com.SistemaConciliacion.Consiliacion.config.UploadProperties;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.MovementAttachmentDto;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.MovementAttachment;
@@ -59,8 +60,7 @@ public class MovementAttachmentService {
 		assertMovementInSession(sessionId, side, txId);
 		return movementAttachmentRepository
 				.findBySession_IdAndMovementSideAndMovementIdOrderByCreatedAtAsc(sessionId, side, txId).stream()
-				.map(a -> new MovementAttachmentDto(a.getId(), a.getOriginalFilename(), a.getContentType(),
-						a.getSizeBytes(), a.getCreatedAt()))
+				.map(MovementAttachmentService::toDto)
 				.toList();
 	}
 
@@ -113,10 +113,10 @@ public class MovementAttachmentService {
 		String ct = file.getContentType();
 		row.setContentType(ct != null && ct.length() <= 128 ? ct : guessContentType(ext));
 		row.setSizeBytes(size);
+		row.setCreatedByUsername(SecurityUtils.currentUsername());
 		movementAttachmentRepository.save(row);
 
-		return new MovementAttachmentDto(row.getId(), row.getOriginalFilename(), row.getContentType(),
-				row.getSizeBytes(), row.getCreatedAt());
+		return toDto(row);
 	}
 
 	@Transactional
@@ -200,6 +200,11 @@ public class MovementAttachmentService {
 			case "gif" -> "image/gif";
 			default -> "application/octet-stream";
 		};
+	}
+
+	private static MovementAttachmentDto toDto(MovementAttachment a) {
+		return new MovementAttachmentDto(a.getId(), a.getOriginalFilename(), a.getContentType(), a.getSizeBytes(),
+				a.getCreatedAt(), a.getCreatedByUsername());
 	}
 
 	public record ResourceWithMeta(Resource resource, String downloadFilename, String contentType) {

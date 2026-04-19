@@ -1,3 +1,20 @@
+.home-page-header {
+  margin-bottom: 0.35rem;
+}
+
+.home-page-title {
+  font-size: 1.85rem;
+  font-weight: 600;
+  margin: 0 0 0.45rem;
+  letter-spacing: -0.035em;
+  color: var(--text-h);
+}
+
+.home-module-card--muted {
+  opacity: 0.9;
+  cursor: not-allowed;
+}
+
 .home-app {
   width: 100%;
   box-sizing: border-box;
@@ -5,52 +22,135 @@
   padding: 2rem clamp(1rem, 4vw, 1.75rem) 3rem;
   max-width: min(1040px, calc(100vw - 2rem));
   margin: 0 auto;
-}
-
-.home-app .app-header h1 {
-  font-size: 1.75rem;
-  margin: 0 0 0.5rem;
-  letter-spacing: -0.02em;
-  color: var(--text-h);
+  /* Mismo criterio que .auth-page--login: un solo halo arriba, bordes suaves (sin “cortes” a los costados). */
+  background:
+    radial-gradient(
+      ellipse 85% 55% at 50% -5%,
+      color-mix(in srgb, var(--accent) 16%, transparent),
+      transparent 58%
+    ),
+    var(--bg);
 }
 
 .home-app .subtitle {
   margin: 0;
   font-size: 0.95rem;
   color: var(--text);
+  line-height: 1.45;
+  max-width: 36rem;
 }
 
 .home-main {
-  margin-top: 2rem;
+  margin-top: 2.15rem;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 1.25rem;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
+  gap: 1.5rem;
   align-items: stretch;
 }
 
 .home-module-card {
+  position: relative;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
-  padding: 1.35rem 1.5rem;
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  background: var(--surface, var(--bg));
-  box-shadow: var(--shadow);
+  gap: 0.65rem;
+  padding: 1.55rem 1.65rem 1.45rem;
+  border-radius: 16px;
+  border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  background: color-mix(in srgb, var(--surface) 92%, var(--code-bg) 8%);
+  box-shadow:
+    var(--shadow),
+    0 1px 0 color-mix(in srgb, #fff 5%, transparent) inset;
   text-decoration: none;
   color: inherit;
+  overflow: hidden;
   transition:
-    border-color 0.18s ease,
-    box-shadow 0.18s ease,
-    transform 0.15s ease;
+    border-color 0.2s ease,
+    box-shadow 0.22s ease,
+    transform 0.18s ease,
+    background 0.2s ease;
+}
+
+html[data-theme='light'] .home-module-card {
+  background: color-mix(in srgb, var(--surface) 98%, var(--bg));
+  box-shadow:
+    var(--shadow),
+    0 1px 0 rgba(255, 255, 255, 0.85) inset;
+}
+
+.home-module-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  border-radius: 16px 16px 0 0;
+  background: linear-gradient(
+    90deg,
+    var(--accent),
+    color-mix(in srgb, var(--accent) 55%, var(--border) 45%)
+  );
+  opacity: 0.92;
+}
+
+.home-module-card--secondary::before {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--text-h) 25%, var(--border)),
+    color-mix(in srgb, var(--border) 80%, var(--accent) 20%)
+  );
+  opacity: 0.95;
+}
+
+.home-module-card--interactive {
+  padding-right: 2.75rem;
+  cursor: pointer;
+}
+
+.home-module-card--interactive::after {
+  content: '';
+  position: absolute;
+  right: 1.35rem;
+  top: 50%;
+  width: 0.55rem;
+  height: 0.55rem;
+  margin-top: -0.28rem;
+  border-right: 2px solid var(--accent);
+  border-bottom: 2px solid var(--accent);
+  transform: rotate(-45deg);
+  opacity: 0.4;
+  transition:
+    opacity 0.2s ease,
+    transform 0.2s ease,
+    right 0.2s ease;
+}
+
+.home-module-card--secondary.home-module-card--interactive::after {
+  border-color: color-mix(in srgb, var(--accent) 75%, var(--text));
 }
 
 .home-module-card:hover {
   border-color: var(--accent-border);
   box-shadow:
     var(--shadow),
-    0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent);
-  transform: translateY(-2px);
+    0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent),
+    0 12px 28px color-mix(in srgb, var(--accent) 12%, transparent);
+  transform: translateY(-3px);
+}
+
+/* Misma respuesta visual que Conciliación (franja accent + flecha) al pasar el mouse. */
+.home-module-card.home-module-card--secondary.home-module-card--interactive:hover::before {
+  background: linear-gradient(
+    90deg,
+    var(--accent),
+    color-mix(in srgb, var(--accent) 55%, var(--border) 45%)
+  );
+  opacity: 0.92;
+}
+
+.home-module-card--interactive:hover::after {
+  opacity: 0.95;
+  right: 1.15rem;
 }
 
 .home-module-card:focus-visible {
@@ -59,21 +159,40 @@
 }
 
 .home-module-card h2 {
-  font-size: 1.15rem;
+  font-size: 1.22rem;
+  font-weight: 600;
   margin: 0;
+  padding-top: 0.15rem;
   color: var(--text-h);
-  letter-spacing: -0.02em;
+  letter-spacing: -0.03em;
+  line-height: 1.25;
 }
 
 .home-module-card p {
   margin: 0;
-  font-size: 0.92rem;
-  line-height: 1.45;
+  font-size: 0.93rem;
+  line-height: 1.5;
   color: var(--text);
 }
 
 .home-module-card--secondary {
-  opacity: 0.96;
+  opacity: 0.98;
+}
+
+.home-module-card--muted:hover {
+  transform: none;
+  border-color: color-mix(in srgb, var(--border) 72%, transparent);
+  box-shadow:
+    var(--shadow),
+    0 1px 0 color-mix(in srgb, #fff 5%, transparent) inset;
+}
+
+.home-module-card--muted:hover::before {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--text-h) 25%, var(--border)),
+    color-mix(in srgb, var(--border) 80%, var(--accent) 20%)
+  );
 }
 
 .usuarios-back-wrap {
@@ -98,6 +217,67 @@
 
 .home-main--single {
   margin-top: 1.5rem;
+}
+
+.usuarios-admin-main {
+  margin-top: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.usuarios-form-card h2,
+.usuarios-list-card h2 {
+  margin-top: 0;
+  font-size: 1.05rem;
+}
+
+.usuarios-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  gap: 0.85rem 1rem;
+  align-items: end;
+}
+
+.usuarios-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-h);
+}
+
+.usuarios-form input,
+.usuarios-form select {
+  padding: 0.45rem 0.55rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+
+.usuarios-table-wrap {
+  overflow-x: auto;
+}
+
+.usuarios-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.usuarios-table th,
+.usuarios-table td {
+  padding: 0.5rem 0.65rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+
+.usuarios-toggle-btn {
+  font-size: 0.82rem;
+  padding: 0.35rem 0.75rem;
 }
 
 .home-module-badge {

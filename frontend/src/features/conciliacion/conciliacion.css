@@ -14,6 +14,32 @@
 
 .conciliacion-back-wrap {
   margin: 0 0 0.35rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem 1rem;
+}
+
+.conciliacion-session-meta {
+  font-size: 0.82rem;
+  color: var(--text);
+}
+
+.conciliacion-logout-btn {
+  margin-left: auto;
+  font-size: 0.85rem;
+  padding: 0.35rem 0.85rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface, var(--bg));
+  color: var(--text-h);
+  font-family: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.conciliacion-logout-btn:hover {
+  border-color: var(--accent-border);
 }
 
 .conciliacion-home-link {
@@ -2175,11 +2201,30 @@ html[data-theme='dark'] .msg.err {
   border: 1px solid var(--border);
 }
 
+.comment-bubble-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.35rem 0.75rem;
+  margin-bottom: 0.35rem;
+}
+
+.comment-bubble-author {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
 .comment-bubble-time {
   display: block;
   font-size: 0.72rem;
   color: var(--text-h);
   margin-bottom: 0.35rem;
+}
+
+.comment-bubble-meta .comment-bubble-time {
+  margin-bottom: 0;
 }
 
 .comment-bubble-body {
@@ -2333,6 +2378,22 @@ html[data-theme='light'] .attachment-thread-btn:hover {
   object-fit: contain;
 }
 
+.attachment-preview-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 120px;
+  padding: 0.75rem;
+  font-size: 0.82rem;
+  color: var(--text-h);
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+}
+
+.attachment-preview-err {
+  margin: 0;
+  font-size: 0.8rem;
+}
+
 .image-lightbox-backdrop {
   position: fixed;
   inset: 0;
@@ -2414,6 +2475,14 @@ html[data-theme='light'] .attachment-thread-btn:hover {
   color: var(--text-h);
 }
 
+.image-lightbox-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
+  align-items: center;
+  justify-content: flex-end;
+}
+
 .image-lightbox-download {
   flex-shrink: 0;
 }
@@ -2439,6 +2508,10 @@ html[data-theme='light'] .attachment-thread-btn:hover {
   font-size: 0.72rem;
   color: var(--text);
   margin-top: 0.2rem;
+}
+
+.attachment-meta-user {
+  font-weight: 600;
 }
 
 .attachment-delete {
@@ -2800,6 +2873,10 @@ html[data-theme='light'] .comment-bubble-body {
 
 html[data-theme='light'] .comment-bubble-time {
   color: #5a5463;
+}
+
+html[data-theme='light'] .comment-bubble-author {
+  color: #2d2835;
 }
 
 /* Historial: en claro la card y la grilla eran del mismo tono — pozo interior + filas blancas/zebra */

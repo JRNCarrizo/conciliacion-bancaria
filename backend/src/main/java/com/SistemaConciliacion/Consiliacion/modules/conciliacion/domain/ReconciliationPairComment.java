@@ -35,6 +35,9 @@ public class ReconciliationPairComment {
 	@Column(name = "created_at", nullable = false)
 	private Instant createdAt;
 
+	@Column(name = "created_by_username", length = 128)
+	private String createdByUsername;
+
 	@PrePersist
 	void prePersist() {
 		if (createdAt == null) {
@@ -80,6 +83,14 @@ public class ReconciliationPairComment {
 
 	public void setCreatedAt(Instant createdAt) {
 		this.createdAt = createdAt;
+	}
+
+	public String getCreatedByUsername() {
+		return createdByUsername;
+	}
+
+	public void setCreatedByUsername(String createdByUsername) {
+		this.createdByUsername = createdByUsername;
 	}
 }
 
