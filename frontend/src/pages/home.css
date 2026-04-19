@@ -195,21 +195,6 @@ html[data-theme='light'] .home-module-card {
   );
 }
 
-.usuarios-back-wrap {
-  margin-bottom: 0.35rem;
-}
-
-.usuarios-back-link {
-  font-size: 0.88rem;
-  font-weight: 600;
-  color: var(--accent);
-  text-decoration: none;
-}
-
-.usuarios-back-link:hover {
-  text-decoration: underline;
-}
-
 .usuarios-placeholder {
   pointer-events: none;
   grid-column: 1 / -1;

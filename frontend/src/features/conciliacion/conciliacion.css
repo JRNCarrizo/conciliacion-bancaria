@@ -53,12 +53,48 @@
   text-decoration: underline;
 }
 
-.app-header h1 {
-  font-size: 1.75rem;
-  margin: 0 0 0.5rem;
-  letter-spacing: -0.02em;
+.app-header {
+  position: relative;
+  padding: 0.15rem 0 1.35rem;
+  margin: 0 0 0.35rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 58%, transparent);
 }
 
+.app-header::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  bottom: -1px;
+  width: min(5.5rem, 42%);
+  height: 3px;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    var(--accent),
+    color-mix(in srgb, var(--accent) 35%, var(--border))
+  );
+  opacity: 0.95;
+}
+
+.app-header h1 {
+  font-size: clamp(1.75rem, 0.6vw + 1.55rem, 2.1rem);
+  font-weight: 600;
+  margin: 0 0 0.65rem;
+  letter-spacing: -0.04em;
+  line-height: 1.12;
+  color: var(--text-h);
+}
+
+.app-header .subtitle {
+  margin: 0;
+  max-width: 44rem;
+  font-size: 1.02rem;
+  line-height: 1.55;
+  letter-spacing: 0.01em;
+  color: var(--text);
+}
+
+/* Clase genérica por si se reutiliza fuera del header */
 .subtitle {
   margin: 0;
   font-size: 0.95rem;
@@ -556,23 +592,115 @@ html[data-theme='dark'] .import-form-files .import-file-input::-webkit-file-uplo
 
 .history-th-actions {
   text-align: right;
-  min-width: 6.5rem;
+  min-width: 8.75rem;
 }
 
 .history-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem 0.75rem;
+  gap: 0.45rem 0.55rem;
   align-items: center;
   justify-content: flex-end;
 }
 
-.history-open-btn {
-  font-size: 0.85rem;
+/* Botones de fila — chips compactos (no el aspecto “link” suelto) */
+.history-actions .history-open-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2rem;
+  padding: 0.35rem 0.8rem;
+  border-radius: 8px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-decoration: none;
+  border: 1px solid var(--accent-border);
+  background: color-mix(in srgb, var(--accent-bg) 88%, var(--bg));
+  color: var(--text-h);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--accent) 12%, transparent);
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    transform 0.12s ease;
 }
 
-.history-excel-link {
-  font-size: 0.85rem;
+.history-actions .history-open-btn:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--accent-bg) 100%, var(--bg));
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--accent-border));
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.history-actions .history-open-btn:active {
+  transform: translateY(1px);
+}
+
+.history-actions .history-open-btn:focus-visible {
+  outline: 2px solid var(--accent-border);
+  outline-offset: 2px;
+}
+
+.history-actions .history-excel-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2rem;
+  padding: 0.35rem 0.8rem;
+  border-radius: 8px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-decoration: none;
+  text-align: center;
+  font-family: inherit;
+  cursor: pointer;
+  border: 1px solid color-mix(in srgb, #107c41 42%, var(--border));
+  background: color-mix(in srgb, #107c41 9%, var(--bg));
+  color: color-mix(in srgb, #0d5c32 70%, var(--text-h));
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    transform 0.12s ease,
+    opacity 0.15s ease;
+}
+
+.history-actions .history-excel-link:hover:not(:disabled) {
+  opacity: 1;
+  background: color-mix(in srgb, #107c41 16%, var(--bg));
+  border-color: color-mix(in srgb, #107c41 55%, var(--border));
+  box-shadow: 0 2px 6px color-mix(in srgb, #107c41 22%, transparent);
+}
+
+.history-actions .history-excel-link:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.history-actions .history-excel-link:focus-visible {
+  outline: 2px solid color-mix(in srgb, #107c41 55%, var(--border));
+  outline-offset: 2px;
+}
+
+.history-actions .history-excel-link:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+html[data-theme='dark'] .history-actions .history-excel-link {
+  border-color: color-mix(in srgb, #34d399 38%, var(--border));
+  background: color-mix(in srgb, #34d399 12%, var(--bg));
+  color: color-mix(in srgb, #d1fae5 55%, var(--text-h));
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+}
+
+html[data-theme='dark'] .history-actions .history-excel-link:hover:not(:disabled) {
+  background: color-mix(in srgb, #34d399 22%, var(--bg));
+  border-color: color-mix(in srgb, #34d399 50%, var(--border));
 }
 
 .history-pagination {
@@ -2568,25 +2696,38 @@ html[data-theme='light'] .attachment-thread-btn:hover {
   box-sizing: border-box;
 }
 
-/* Tema claro: celdas y paneles más sólidos (menos “lavado”) */
-html[data-theme='light'] .data-table:not(.compare-table) tbody td {
-  background: var(--surface);
-  color: #16131c;
+/* Tema claro (solo conciliación, .app): celdas y texto más legibles */
+html[data-theme='light'] .app {
+  --text: #2a2330;
+  --text-h: #0c0812;
 }
 
-html[data-theme='light'] .data-table:not(.compare-table) tbody tr:nth-child(even) td {
-  background: color-mix(in srgb, var(--code-bg) 14%, var(--surface));
+html[data-theme='light'] .app .data-table:not(.compare-table) th {
+  background: #d2cdc4;
+  color: #141018;
+  border-color: #9a929e;
+  font-weight: 600;
 }
 
-html[data-theme='light'] .data-table.compare-table tbody td {
+html[data-theme='light'] .app .data-table:not(.compare-table) tbody td {
+  background: #ffffff;
+  color: #1a1420;
+  border-color: #c5c0c8;
+}
+
+html[data-theme='light'] .app .data-table:not(.compare-table) tbody tr:nth-child(even) td {
+  background: #efede9;
+}
+
+html[data-theme='light'] .app .data-table.compare-table tbody td {
   background-color: transparent;
-  /* Texto más oscuro sobre fondos de estado (pastel) en modo claro */
-  color: #16131c;
+  color: #1a1420;
 }
 
-html[data-theme='light'] .compare-table .compare-muted {
-  color: #3d3744;
-  opacity: 0.92;
+html[data-theme='light'] .app .compare-table .compare-muted {
+  color: #3f3648;
+  opacity: 1;
+  font-weight: 500;
 }
 
 html[data-theme='light'] .session-detail-shell {
@@ -2834,10 +2975,12 @@ html[data-theme='light'] .exec-summary-disclosure-body {
   border-top: 1px solid color-mix(in srgb, var(--accent) 32%, var(--border));
 }
 
-html[data-theme='light'] .card {
-  background: color-mix(in srgb, var(--border) 24%, var(--code-bg));
-  border-color: color-mix(in srgb, var(--text-h) 12%, var(--border));
-  box-shadow: var(--shadow);
+html[data-theme='light'] .app .card {
+  background: #f4f2ef;
+  border-color: #b0a8b4;
+  box-shadow:
+    rgba(0, 0, 0, 0.06) 0 1px 3px,
+    rgba(0, 0, 0, 0.05) 0 8px 20px -4px;
 }
 
 html[data-theme='light'] .comment-modal {
@@ -2879,41 +3022,102 @@ html[data-theme='light'] .comment-bubble-author {
   color: #2d2835;
 }
 
-/* Historial: en claro la card y la grilla eran del mismo tono — pozo interior + filas blancas/zebra */
-html[data-theme='light'] .card--history .history-table-wrap {
+/*
+ * Historial (modo claro): el pozo de la tabla contrasta con la card;
+ * cabecera más oscura; zebra más marcada que el fondo del pozo.
+ */
+html[data-theme='light'] .app .card--history .history-table-wrap {
   margin-top: 0.5rem;
-  padding: 0.45rem;
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--border) 32%, var(--code-bg));
-  border: 1px solid color-mix(in srgb, var(--text-h) 11%, var(--border));
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.05);
+  padding: 0.55rem;
+  border-radius: 12px;
+  background: #d8d3cc;
+  border: 1px solid #9a929e;
+  box-shadow:
+    inset 0 2px 4px rgba(0, 0, 0, 0.07),
+    inset 0 1px 0 rgba(255, 255, 255, 0.35);
 }
 
-html[data-theme='light'] .card--history .history-table thead th {
-  background: color-mix(in srgb, var(--code-bg) 58%, var(--border));
-  color: var(--text-h);
-  border-color: color-mix(in srgb, var(--text-h) 8%, var(--border));
+html[data-theme='light'] .app .card--history .history-table {
+  font-size: 0.84rem;
 }
 
-html[data-theme='light'] .card--history .history-table tbody td {
+html[data-theme='light'] .app .card--history .history-table .cell-mono {
+  color: #1f1826;
+  font-size: 0.8rem;
+}
+
+html[data-theme='light'] .app .card--history .history-table thead th {
+  background: #c4beb4;
+  color: #100b14;
+  border-color: #8f8794;
+  font-weight: 600;
+}
+
+html[data-theme='light'] .app .card--history .history-table tbody td {
   background: #ffffff;
-  border-color: color-mix(in srgb, var(--text-h) 6%, var(--border));
-  color: #16131c;
+  border-color: #c0b8c4;
+  color: #1a1420;
 }
 
-html[data-theme='light'] .card--history .history-table tbody tr:nth-child(even) td {
-  background: color-mix(in srgb, var(--code-bg) 11%, #ffffff);
+html[data-theme='light'] .app .card--history .history-table tbody tr:nth-child(even) td {
+  background: #f2f0ec;
 }
 
-html[data-theme='light'] .card--history .history-table tbody tr.history-row--active td {
-  background: color-mix(in srgb, var(--accent-bg) 72%, #ffffff);
-  border-color: color-mix(in srgb, var(--accent) 22%, var(--border));
+html[data-theme='light'] .app .card--history .history-table tbody tr.history-row--active td {
+  background: color-mix(in srgb, var(--accent-bg) 78%, #f8f4ff);
+  border-color: color-mix(in srgb, var(--accent) 35%, #a898b0);
 }
 
-html[data-theme='light'] .card--history .history-table tbody tr.history-row--closed.history-row--active td {
-  background: color-mix(in srgb, var(--accent-bg) 58%, color-mix(in srgb, var(--code-bg) 12%, #ffffff));
+html[data-theme='light'] .app .card--history .history-table tbody tr.history-row--closed.history-row--active td {
+  background: color-mix(in srgb, var(--accent-bg) 62%, #ebe6f2);
+  border-color: color-mix(in srgb, var(--accent) 28%, #9e96a8);
 }
 
-html[data-theme='light'] .card--history .history-pagination {
-  border-top-color: color-mix(in srgb, var(--text-h) 10%, var(--border));
+html[data-theme='light'] .app .card--history .history-pagination {
+  border-top-color: #a89fb0;
+}
+
+html[data-theme='light'] .app .card--history h2 {
+  color: var(--text-h);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+html[data-theme='light'] .app .card--history .history-hint,
+html[data-theme='light'] .app .card--history .history-toolbar-meta,
+html[data-theme='light'] .app .card--history .history-page-info {
+  color: #2f2734;
+  font-weight: 500;
+}
+
+html[data-theme='dark'] .app .app-header .subtitle {
+  color: color-mix(in srgb, var(--text) 92%, var(--text-h));
+  line-height: 1.58;
+}
+
+html[data-theme='light'] .app .app-header .subtitle {
+  color: #2e2633;
+  font-weight: 500;
+}
+
+html[data-theme='light'] .app .hint,
+html[data-theme='light'] .app p.subtle {
+  color: #322a38;
+  font-weight: 500;
+}
+
+html[data-theme='light'] .app .conciliacion-session-meta {
+  color: #3a3244;
+  font-weight: 500;
+}
+
+html[data-theme='light'] .app .subsection-title {
+  color: var(--text-h);
+  font-weight: 600;
+}
+
+html[data-theme='light'] .app .card h2 {
+  color: var(--text-h);
+  font-weight: 600;
+  letter-spacing: -0.02em;
 }

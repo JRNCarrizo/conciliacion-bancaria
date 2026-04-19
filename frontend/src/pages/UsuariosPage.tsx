@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
-import { Link } from 'react-router-dom'
 import { apiFetch } from '../api/client'
 import type { AppRole } from '../auth/types'
 import { parseError } from '../features/conciliacion/api/http'
@@ -93,11 +92,6 @@ export function UsuariosPage() {
   return (
     <div className="home-app">
       <header className="app-header">
-        <p className="subtitle usuarios-back-wrap">
-          <Link to="/" className="usuarios-back-link">
-            ← Volver al inicio
-          </Link>
-        </p>
         <h1>Gestión de usuarios</h1>
         <p className="subtitle">Alta de cuentas y asignación de rol (solo administrador).</p>
       </header>
