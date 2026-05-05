@@ -20,6 +20,9 @@ export function LoginPage() {
 
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  /** Evita que el navegador rellene usuario/clave guardados antes de que el usuario enfoque el campo */
+  const [usernameReadOnly, setUsernameReadOnly] = useState(true)
+  const [passwordReadOnly, setPasswordReadOnly] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
@@ -52,12 +55,17 @@ export function LoginPage() {
           <BrandLogo className="auth-brand-logo" alt="" />
         </div>
         <h1 className="auth-title auth-title--center">Iniciar sesión</h1>
-        <form className="auth-form" onSubmit={onSubmit}>
+        <form className="auth-form" onSubmit={onSubmit} autoComplete="off">
           <label className="auth-label">
             Usuario
             <input
               className="auth-input"
-              autoComplete="username"
+              name="username"
+              autoComplete="off"
+              autoCorrect="off"
+              spellCheck={false}
+              readOnly={usernameReadOnly}
+              onFocus={() => setUsernameReadOnly(false)}
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               required
@@ -67,8 +75,11 @@ export function LoginPage() {
             Contraseña
             <input
               className="auth-input"
+              name="password"
               type="password"
-              autoComplete="current-password"
+              autoComplete="off"
+              readOnly={passwordReadOnly}
+              onFocus={() => setPasswordReadOnly(false)}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required

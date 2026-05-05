@@ -36,3 +36,5 @@ build/
 ### Node / frontend ###
 frontend/node_modules/
 frontend/dist/
+# Embebido en JAR (npm run build → backend vía Vite; también lo genera mvn package)
+backend/src/main/resources/static/

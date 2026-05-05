@@ -1984,7 +1984,7 @@ function SessionActivityModal({
           </button>
         </header>
         <p className="session-activity-hint">
-          Importación, apertura del detalle, conciliación, saldos y cierre — quién y cuándo.
+          Importación, apertura del detalle, conciliación, saldos, cierre y reapertura (admin) — quién y cuándo.
         </p>
         {loading && (
           <div className="session-activity-state session-activity-state--loading" aria-busy="true">
@@ -2594,6 +2594,7 @@ export default function ConciliacionPage() {
   const [manualLoading, setManualLoading] = useState(false)
   const [manualError, setManualError] = useState<string | null>(null)
   const [closeSessionLoading, setCloseSessionLoading] = useState(false)
+  const [reopenSessionLoading, setReopenSessionLoading] = useState(false)
   const [exportLoading, setExportLoading] = useState(false)
   const [exportError, setExportError] = useState<string | null>(null)
 
@@ -2732,6 +2733,29 @@ export default function ConciliacionPage() {
       const a = document.createElement('a')
       a.href = url
       a.download = `conciliacion-sesion-${sessionId}.xlsx`
+      a.rel = 'noopener'
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      setExportError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setExportLoading(false)
+    }
+  }, [])
+
+  const downloadSessionPdf = useCallback(async (sessionId: number) => {
+    setExportError(null)
+    setExportLoading(true)
+    try {
+      const r = await apiFetch(`/api/v1/conciliacion/sessions/${sessionId}/export/pdf`)
+      if (!r.ok) throw new Error(await parseError(r))
+      const blob = await r.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `conciliacion-sesion-${sessionId}.pdf`
       a.rel = 'noopener'
       document.body.appendChild(a)
       a.click()
@@ -2975,6 +2999,38 @@ export default function ConciliacionPage() {
     }
   }
 
+  async function handleReopenSession() {
+    if (selectedId == null || user?.role !== 'ADMIN') return
+    if (
+      !window.confirm(
+        '¿Reabrir esta sesión? Volverán a poder modificarse saldos, clasificación y conciliación. Quedará registrado en Actividad.',
+      )
+    ) {
+      return
+    }
+    const reason = window.prompt('Motivo (opcional; queda en el historial de auditoría):', '')
+    if (reason === null) return
+    setReopenSessionLoading(true)
+    setDetailError(null)
+    try {
+      const r = await apiFetch(`/api/v1/conciliacion/sessions/${selectedId}/reapertura`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: reason.trim() || null }),
+      })
+      if (!r.ok) throw new Error(await parseError(r))
+      await loadDetail(selectedId, { soft: true })
+      await loadSessionListPage(sessionListPage)
+      if (activityModalSessionId === selectedId) {
+        await openSessionActivity(selectedId)
+      }
+    } catch (e) {
+      setDetailError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setReopenSessionLoading(false)
+    }
+  }
+
   async function handleConciliar() {
     if (selectedId == null) return
     setConciliarLoading(true)
@@ -3076,9 +3132,9 @@ export default function ConciliacionPage() {
             <div className="history-card-head-text">
               <h2 className="history-card-title">Sesiones de conciliación</h2>
               <p className="hint history-hint">
-                Listado de las importaciones guardadas. Elegí <strong>Abrir</strong> para el detalle
+                Listado de las importaciones guardadas.                 Elegí <strong>Abrir</strong> para el detalle
                 (comparativa, vistas y cierre), <strong>Actividad</strong> para ver quién hizo qué y{' '}
-                <strong>Excel</strong> para exportar.
+                <strong>Excel</strong> o <strong>PDF</strong> para exportar.
               </p>
             </div>
             <div className="history-card-actions">
@@ -3188,6 +3244,15 @@ export default function ConciliacionPage() {
                           >
                             Excel
                           </button>
+                          <button
+                            type="button"
+                            className="export-link history-pdf-link"
+                            title="Informe en PDF: resumen, conciliados y pendientes"
+                            disabled={exportLoading}
+                            onClick={() => void downloadSessionPdf(s.id)}
+                          >
+                            PDF
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -3288,10 +3353,11 @@ export default function ConciliacionPage() {
                     <div>
                       <h3 className="import-layout-h3">Extracto banco</h3>
                       <div className="import-layout-fields">
-                        <label className="import-layout-field">
+                        <label className="import-layout-field import-layout-field--meta">
                           <span>Hoja (1 = primera pestaña)</span>
                           <input
                             type="number"
+                            className="import-layout-meta-input"
                             min={1}
                             value={importBankLayoutExcel.sheetNumber}
                             onChange={(e) =>
@@ -3302,10 +3368,11 @@ export default function ConciliacionPage() {
                             }
                           />
                         </label>
-                        <label className="import-layout-field">
+                        <label className="import-layout-field import-layout-field--meta">
                           <span>Fila de títulos de columnas</span>
                           <input
                             type="number"
+                            className="import-layout-meta-input"
                             min={1}
                             value={importBankLayoutExcel.titleRowNumber}
                             onChange={(e) =>
@@ -3316,10 +3383,11 @@ export default function ConciliacionPage() {
                             }
                           />
                         </label>
-                        <label className="import-layout-field">
+                        <label className="import-layout-field import-layout-field--meta">
                           <span>Primera fila de movimientos</span>
                           <input
                             type="number"
+                            className="import-layout-meta-input"
                             min={1}
                             value={importBankLayoutExcel.firstDataRowNumber}
                             onChange={(e) =>
@@ -3419,10 +3487,11 @@ export default function ConciliacionPage() {
                     <div>
                       <h3 className="import-layout-h3">Libro / plataforma (debe − haber)</h3>
                       <div className="import-layout-fields">
-                        <label className="import-layout-field">
+                        <label className="import-layout-field import-layout-field--meta">
                           <span>Hoja (1 = primera pestaña)</span>
                           <input
                             type="number"
+                            className="import-layout-meta-input"
                             min={1}
                             value={importCompanyLayoutExcel.sheetNumber}
                             onChange={(e) =>
@@ -3433,10 +3502,11 @@ export default function ConciliacionPage() {
                             }
                           />
                         </label>
-                        <label className="import-layout-field">
+                        <label className="import-layout-field import-layout-field--meta">
                           <span>Fila de títulos de columnas</span>
                           <input
                             type="number"
+                            className="import-layout-meta-input"
                             min={1}
                             value={importCompanyLayoutExcel.titleRowNumber}
                             onChange={(e) =>
@@ -3447,10 +3517,11 @@ export default function ConciliacionPage() {
                             }
                           />
                         </label>
-                        <label className="import-layout-field">
+                        <label className="import-layout-field import-layout-field--meta">
                           <span>Primera fila de movimientos</span>
                           <input
                             type="number"
+                            className="import-layout-meta-input"
                             min={1}
                             value={importCompanyLayoutExcel.firstDataRowNumber}
                             onChange={(e) =>
@@ -3657,6 +3728,15 @@ export default function ConciliacionPage() {
                   >
                     {exportLoading ? 'Generando…' : 'Exportar Excel'}
                   </button>
+                  <button
+                    type="button"
+                    className="btn-secondary session-export-pdf-btn"
+                    title="Resumen ejecutivo, conciliados y pendientes"
+                    disabled={exportLoading}
+                    onClick={() => void downloadSessionPdf(selectedId)}
+                  >
+                    {exportLoading ? 'Generando…' : 'Exportar PDF'}
+                  </button>
                   {detailMatchesSelection && !detailLoading && !sessionClosed && (
                     <button
                       type="button"
@@ -3667,6 +3747,17 @@ export default function ConciliacionPage() {
                       {closeSessionLoading ? 'Cerrando…' : 'Cerrar sesión'}
                     </button>
                   )}
+                  {detailMatchesSelection && !detailLoading && sessionClosed && user?.role === 'ADMIN' && (
+                    <button
+                      type="button"
+                      className="btn-secondary session-reopen-btn"
+                      disabled={reopenSessionLoading}
+                      onClick={() => void handleReopenSession()}
+                      title="Solo administrador; queda registrado en Actividad"
+                    >
+                      {reopenSessionLoading ? 'Reabriendo…' : 'Reabrir sesión'}
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -3674,6 +3765,13 @@ export default function ConciliacionPage() {
                 <div className="session-closed-banner" role="status">
                   Sesión cerrada: saldos, clasificación de pendientes y conciliación automática bloqueados.
                   Podés consultar y exportar.
+                  {user?.role === 'ADMIN' && (
+                    <>
+                      {' '}
+                      Como administrador podés usar <strong>Reabrir sesión</strong>; el motivo opcional queda en{' '}
+                      <strong>Actividad</strong>.
+                    </>
+                  )}
                 </div>
               )}
 

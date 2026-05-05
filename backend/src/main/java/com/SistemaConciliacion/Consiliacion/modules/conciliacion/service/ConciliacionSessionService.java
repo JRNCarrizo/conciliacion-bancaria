@@ -203,6 +203,30 @@ public class ConciliacionSessionService {
 		return toHeader(s);
 	}
 
+	/**
+	 * Solo administrador. Restaura estado editable: RECONCILED si hay al menos un par, si no IMPORTED.
+	 */
+	@Transactional
+	public SessionHeaderDto reopenSession(long sessionId, String reason) {
+		ReconciliationSession s = sessionRepository.findById(sessionId)
+				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sesión no encontrada"));
+		if (s.getStatus() != SessionStatus.CLOSED) {
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "La sesión no está cerrada.");
+		}
+		long pairCount = reconciliationPairRepository.countBySession_Id(sessionId);
+		s.setStatus(pairCount > 0 ? SessionStatus.RECONCILED : SessionStatus.IMPORTED);
+		sessionRepository.save(s);
+		String detail = null;
+		if (reason != null) {
+			String t = reason.trim();
+			if (!t.isEmpty()) {
+				detail = t.length() > 512 ? t.substring(0, 512) : t;
+			}
+		}
+		sessionAuditService.append(sessionId, SessionAuditEventType.REOPEN_SESSION, detail);
+		return toHeader(s);
+	}
+
 	@Transactional
 	public SessionHeaderDto putBalances(long sessionId, SessionBalancesDto dto) {
 		ReconciliationSession s = sessionRepository.findById(sessionId)

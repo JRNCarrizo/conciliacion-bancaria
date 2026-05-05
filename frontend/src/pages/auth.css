@@ -121,10 +121,6 @@ html[data-theme='dark'] .auth-brand-frame {
   text-align: center;
 }
 
-.auth-unavailable-actions {
-  margin: 0.35rem 0 0;
-}
-
 .auth-sub a {
   color: var(--accent);
   font-weight: 600;
@@ -219,4 +215,42 @@ html[data-theme='dark'] .auth-brand-frame {
 .auth-hint a {
   color: var(--accent);
   font-weight: 600;
+}
+
+.auth-msg--center {
+  text-align: center;
+  margin: 0.35rem 0 0;
+}
+
+.auth-setup-lead {
+  margin-bottom: 1.35rem;
+  line-height: 1.45;
+}
+
+.auth-back--split {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.5rem;
+}
+
+.auth-back-sep {
+  color: color-mix(in srgb, var(--text) 45%, transparent);
+  user-select: none;
+}
+
+.auth-card--login .auth-back--split a {
+  color: var(--text);
+  font-weight: 500;
+  text-decoration: none;
+  opacity: 0.88;
+  transition:
+    color 0.15s ease,
+    opacity 0.15s ease;
+}
+
+.auth-card--login .auth-back--split a:hover {
+  color: var(--accent);
+  opacity: 1;
 }

@@ -30,12 +30,13 @@ public class JwtService {
 		this.expirationMs = expirationMs;
 	}
 
-	public String generateToken(String username, AppRole role) {
+	public String generateToken(String username, AppRole role, long sessionVersion) {
 		Date now = new Date();
 		Date exp = new Date(now.getTime() + expirationMs);
 		return Jwts.builder()
 				.subject(username)
 				.claim("role", role.name())
+				.claim("sid", sessionVersion)
 				.issuedAt(now)
 				.expiration(exp)
 				.signWith(secretKey)

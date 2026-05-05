@@ -40,6 +40,7 @@ import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.Concili
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.ManualPairRequestDto;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.ManualPairResponseDto;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.MovementAttachmentDto;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.ReopenSessionRequestDto;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.SessionBalancesDto;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.SessionDetailDto;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.SessionHeaderDto;
@@ -96,7 +97,7 @@ public class ConciliacionController {
 		return Map.of(
 				"module", "conciliacion",
 				"ready", true,
-				"note", "POST /import opcional ?layout= JSON (mapeo filas/columnas banco y empresa); GET export.csv | export.xlsx; POST /sessions/{id}/pares manual; AUTO no borra MANUAL al conciliar");
+				"note", "POST /import opcional ?layout= JSON (mapeo filas/columnas banco y empresa); GET export.csv | export.xlsx | export/pdf; POST /sessions/{id}/pares manual; AUTO no borra MANUAL al conciliar");
 	}
 
 	@PostMapping(value = "/import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -139,6 +140,15 @@ public class ConciliacionController {
 	@PostMapping("/sessions/{id}/cierre")
 	public SessionHeaderDto cerrarSesion(@PathVariable long id) {
 		return conciliacionSessionService.closeSession(id);
+	}
+
+	/** Solo administrador: revierte el cierre y deja la sesión editable de nuevo (registrado en auditoría). */
+	@PreAuthorize("hasRole('ADMIN')")
+	@PostMapping(value = "/sessions/{id}/reapertura", consumes = MediaType.APPLICATION_JSON_VALUE)
+	public SessionHeaderDto reopenSession(@PathVariable long id,
+			@RequestBody(required = false) ReopenSessionRequestDto body) {
+		String reason = body != null ? body.reason() : null;
+		return conciliacionSessionService.reopenSession(id, reason);
 	}
 
 	@PreAuthorize("hasAnyRole('ADMIN', 'OPERADOR')")
@@ -338,6 +348,15 @@ public class ConciliacionController {
 				.header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"conciliacion-sesion-" + id + ".xlsx\"")
 				.contentType(MediaType.parseMediaType(
 						"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+				.body(data);
+	}
+
+	@GetMapping("/sessions/{id}/export/pdf")
+	public ResponseEntity<byte[]> exportPdf(@PathVariable long id) {
+		byte[] data = conciliacionExportService.exportPdf(id);
+		return ResponseEntity.ok()
+				.header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"conciliacion-sesion-" + id + ".pdf\"")
+				.contentType(MediaType.APPLICATION_PDF)
 				.body(data);
 	}
 

@@ -77,6 +77,7 @@ public class SessionAuditService {
 			case RECONCILE -> "Conciliar (automático)";
 			case SAVE_BALANCES -> "Guardó saldos";
 			case CLOSE_SESSION -> "Cerró la sesión";
+			case REOPEN_SESSION -> "Reabrió la sesión";
 			case VIEW_DETAIL -> "Abrió el detalle de la sesión";
 		};
 	}

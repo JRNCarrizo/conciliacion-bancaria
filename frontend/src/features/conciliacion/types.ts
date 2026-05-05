@@ -69,7 +69,7 @@ export type SessionSummary = {
   matchedPairs: number
 }
 
-/** Auditoría por sesión (import, conciliar, saldos, cierre). */
+/** Auditoría por sesión (import, conciliar, saldos, cierre, reapertura admin). */
 export type SessionAuditEntry = {
   id: number
   eventType: string

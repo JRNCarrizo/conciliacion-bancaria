@@ -34,6 +34,7 @@ import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.CompanyT
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.ReconciliationPair;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.repository.BankTransactionRepository;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.repository.CompanyTransactionRepository;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.pdf.ConciliacionPdfReportWriter;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.repository.ReconciliationPairRepository;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.repository.ReconciliationSessionRepository;
 
@@ -95,6 +96,17 @@ public class ConciliacionExportService {
 			writeDetalleCompletoSheet(wb, d);
 			wb.write(bos);
 			return bos.toByteArray();
+		} catch (IOException e) {
+			throw new UncheckedIOException(e);
+		}
+	}
+
+	/** Informe PDF: resumen ejecutivo, conciliados, pendientes banco y empresa (misma base que el Excel). */
+	@Transactional(readOnly = true)
+	public byte[] exportPdf(long sessionId) {
+		SessionDetailDto d = conciliacionSessionService.getSessionDetail(sessionId);
+		try {
+			return ConciliacionPdfReportWriter.build(d);
 		} catch (IOException e) {
 			throw new UncheckedIOException(e);
 		}

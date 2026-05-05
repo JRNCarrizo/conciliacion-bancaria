@@ -28,12 +28,17 @@ public class AuthService {
 		this.userPasswordService = userPasswordService;
 	}
 
+	@Transactional
 	public AuthResponseDto login(LoginRequest request) {
 		authenticationManager.authenticate(
 				new UsernamePasswordAuthenticationToken(request.username().trim(), request.password()));
 		AppUser u = appUserRepository.findByUsernameIgnoreCase(request.username().trim())
 				.orElseThrow(() -> new IllegalArgumentException("Usuario no encontrado."));
-		return AuthResponseDto.of(jwtService.generateToken(u.getUsername(), u.getRole()), u.getUsername(), u.getRole());
+		u.setSessionVersion(u.getSessionVersion() + 1);
+		appUserRepository.save(u);
+		return AuthResponseDto.of(
+				jwtService.generateToken(u.getUsername(), u.getRole(), u.getSessionVersion()),
+				u.getUsername(), u.getRole());
 	}
 
 	@Transactional
@@ -51,7 +56,10 @@ public class AuthService {
 		admin.setRole(AppRole.ADMIN);
 		admin.setEnabled(true);
 		appUserRepository.save(admin);
-		return AuthResponseDto.of(jwtService.generateToken(admin.getUsername(), admin.getRole()), admin.getUsername(),
-				admin.getRole());
+		admin.setSessionVersion(admin.getSessionVersion() + 1);
+		appUserRepository.save(admin);
+		return AuthResponseDto.of(
+				jwtService.generateToken(admin.getUsername(), admin.getRole(), admin.getSessionVersion()),
+				admin.getUsername(), admin.getRole());
 	}
 }

@@ -32,6 +32,10 @@ public class AppUser {
 	@Column(nullable = false)
 	private boolean enabled = true;
 
+	/** Se incrementa en cada login; el JWT lleva el mismo valor para permitir solo una sesión activa. */
+	@Column(name = "session_version", nullable = false)
+	private long sessionVersion = 0;
+
 	@Column(name = "created_at", nullable = false)
 	private Instant createdAt = Instant.now();
 
@@ -73,6 +77,14 @@ public class AppUser {
 
 	public void setEnabled(boolean enabled) {
 		this.enabled = enabled;
+	}
+
+	public long getSessionVersion() {
+		return sessionVersion;
+	}
+
+	public void setSessionVersion(long sessionVersion) {
+		this.sessionVersion = sessionVersion;
 	}
 
 	public Instant getCreatedAt() {

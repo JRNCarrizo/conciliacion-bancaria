@@ -18,6 +18,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -26,6 +27,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 @SpringBootTest
 @AutoConfigureMockMvc
+@ActiveProfiles("local")
 class ConciliacionImportIntegrationTest {
 
 	@Autowired
@@ -94,6 +96,11 @@ class ConciliacionImportIntegrationTest {
 				.andExpect(status().isOk())
 				.andExpect(header().string("Content-Type", containsString("spreadsheetml")));
 
+		mockMvc.perform(get("/api/v1/conciliacion/sessions/{id}/export/pdf", sessionId)
+				.header(HttpHeaders.AUTHORIZATION, auth))
+				.andExpect(status().isOk())
+				.andExpect(header().string("Content-Type", containsString("application/pdf")));
+
 		String balancesJson = """
 				{
 				  "openingBankBalance": 1000.50,
@@ -159,5 +166,45 @@ class ConciliacionImportIntegrationTest {
 		mockMvc.perform(get("/api/v1/conciliacion/sessions/{id}", sessionId)
 				.header(HttpHeaders.AUTHORIZATION, auth)).andExpect(status().isOk())
 				.andExpect(jsonPath("$.session.amountTolerance").value(0));
+	}
+
+	@Test
+	void adminCanReopenClosedSession_auditRecordsReason() throws Exception {
+		String auth = authToken();
+		byte[] bankBytes = new ClassPathResource("fixtures/Octubre-Banco.xls").getInputStream().readAllBytes();
+		byte[] companyBytes = new ClassPathResource("fixtures/Octubre-Plataforma.xlsx").getInputStream()
+				.readAllBytes();
+
+		MockMultipartFile bank = new MockMultipartFile("bank", "Octubre-Banco.xls", "application/vnd.ms-excel",
+				bankBytes);
+		MockMultipartFile company = new MockMultipartFile("company", "Octubre-Plataforma.xlsx",
+				"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", companyBytes);
+
+		String body = mockMvc.perform(multipart("/api/v1/conciliacion/import").file(bank).file(company)
+				.header(HttpHeaders.AUTHORIZATION, auth))
+				.andExpect(status().isOk())
+				.andReturn().getResponse().getContentAsString();
+
+		long sessionId = MAPPER.readTree(body).get("sessionId").asLong();
+
+		mockMvc.perform(post("/api/v1/conciliacion/sessions/{id}/cierre", sessionId)
+				.header(HttpHeaders.AUTHORIZATION, auth))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.status").value("CLOSED"));
+
+		mockMvc.perform(post("/api/v1/conciliacion/sessions/{id}/reapertura", sessionId)
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"reason\":\"Prueba reapertura IT\"}")
+				.header(HttpHeaders.AUTHORIZATION, auth))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.status").value("IMPORTED"));
+
+		String activity = mockMvc.perform(get("/api/v1/conciliacion/sessions/{id}/activity", sessionId)
+				.header(HttpHeaders.AUTHORIZATION, auth))
+				.andExpect(status().isOk())
+				.andReturn().getResponse().getContentAsString();
+
+		org.junit.jupiter.api.Assertions.assertTrue(activity.contains("REOPEN_SESSION"));
+		org.junit.jupiter.api.Assertions.assertTrue(activity.contains("Prueba reapertura IT"));
 	}
 }

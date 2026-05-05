@@ -62,14 +62,12 @@ export function SetupPage() {
 
   if (available === null) {
     return (
-      <div className="auth-page auth-page--center">
-        <div className="auth-card card auth-card--compact">
-          <div className="auth-brand">
-            <div className="auth-brand-frame">
-              <BrandLogo className="auth-brand-logo" alt="" />
-            </div>
+      <div className="auth-page auth-page--login">
+        <div className="auth-card auth-card--login card">
+          <div className="auth-brand auth-brand--plain">
+            <BrandLogo className="auth-brand-logo" alt="" />
           </div>
-          <p className="msg">Comprobando…</p>
+          <p className="msg auth-msg--center">Comprobando…</p>
         </div>
       </div>
     )
@@ -77,18 +75,18 @@ export function SetupPage() {
 
   if (!available) {
     return (
-      <div className="auth-page">
-        <div className="auth-card card">
-          <div className="auth-brand">
-            <div className="auth-brand-frame">
-              <BrandLogo className="auth-brand-logo" alt="" />
-            </div>
+      <div className="auth-page auth-page--login">
+        <div className="auth-card auth-card--login card">
+          <div className="auth-brand auth-brand--plain">
+            <BrandLogo className="auth-brand-logo" alt="" />
           </div>
           <h1 className="auth-title auth-title--center">Alta inicial no disponible</h1>
           <p className="auth-sub auth-sub--center">Ya existe un administrador.</p>
-          <p className="auth-sub auth-sub--center auth-unavailable-actions">
+          <p className="auth-back auth-back--split">
             <Link to="/login">Ir al login</Link>
-            {' · '}
+            <span className="auth-back-sep" aria-hidden="true">
+              ·
+            </span>
             <Link to="/">Inicio</Link>
           </p>
         </div>
@@ -97,19 +95,14 @@ export function SetupPage() {
   }
 
   return (
-    <div className="auth-page">
-      <div className="auth-card card">
-        <div className="auth-brand">
-          <div className="auth-brand-frame">
-            <BrandLogo className="auth-brand-logo" alt="" />
-          </div>
+    <div className="auth-page auth-page--login">
+      <div className="auth-card auth-card--login card">
+        <div className="auth-brand auth-brand--plain">
+          <BrandLogo className="auth-brand-logo" alt="" />
         </div>
-        <h1 className="auth-title">Alta del administrador</h1>
-        <p className="auth-sub">
+        <h1 className="auth-title auth-title--center">Alta del administrador</h1>
+        <p className="auth-sub auth-sub--center auth-setup-lead">
           Creá la cuenta principal (rol administrador). Solo se puede hacer una vez.
-        </p>
-        <p className="auth-sub">
-          <Link to="/">← Inicio</Link>
         </p>
         <form className="auth-form" onSubmit={onSubmit}>
           <label className="auth-label">
@@ -140,6 +133,9 @@ export function SetupPage() {
             {loading ? 'Creando…' : 'Crear administrador'}
           </button>
         </form>
+        <p className="auth-back">
+          <Link to="/">Volver al inicio</Link>
+        </p>
       </div>
     </div>
   )
