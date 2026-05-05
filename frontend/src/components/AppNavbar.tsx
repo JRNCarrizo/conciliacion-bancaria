@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
+import { ChatNavbarTrigger } from '../features/chat/ChatNavbarTrigger'
 import { BrandLogo } from './BrandLogo'
 import { ThemeToggle } from './ThemeToggle'
 import './navbar.css'
@@ -26,15 +27,18 @@ export function AppNavbar() {
         <div className="app-navbar-actions">
           <ThemeToggle className="app-navbar-theme" />
           {isAuthenticated && user ? (
-            <div className="app-navbar-session">
-              <span className="app-navbar-user" title={user.role}>
-                <span className="app-navbar-user-name">{user.username}</span>
-                <span className="app-navbar-user-role">{ROLE_LABEL[user.role] ?? user.role}</span>
-              </span>
-              <button type="button" className="btn-secondary app-navbar-logout" onClick={() => logout()}>
-                Salir
-              </button>
-            </div>
+            <>
+              <ChatNavbarTrigger />
+              <div className="app-navbar-session">
+                <span className="app-navbar-user" title={user.role}>
+                  <span className="app-navbar-user-name">{user.username}</span>
+                  <span className="app-navbar-user-role">{ROLE_LABEL[user.role] ?? user.role}</span>
+                </span>
+                <button type="button" className="btn-secondary app-navbar-logout" onClick={() => logout()}>
+                  Salir
+                </button>
+              </div>
+            </>
           ) : (
             <div className="app-navbar-guest">
               <Link to="/login" className="app-navbar-link app-navbar-link--cta">

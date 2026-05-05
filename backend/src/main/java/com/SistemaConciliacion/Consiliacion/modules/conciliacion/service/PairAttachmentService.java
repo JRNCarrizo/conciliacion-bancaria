@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Collection;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -136,6 +137,28 @@ public class PairAttachmentService {
 		} catch (IOException e) {
 			throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
 					"No se pudo eliminar el archivo del disco.");
+		}
+	}
+
+	/**
+	 * Quita del disco los archivos de adjuntos de los pares indicados. Los registros en BD se eliminan
+	 * después (p. ej. por CASCADE al borrar el par); aquí solo evitamos archivos huérfanos.
+	 */
+	public void deleteStoredFilesForPairs(long sessionId, Collection<Long> pairIds) {
+		if (pairIds == null || pairIds.isEmpty()) {
+			return;
+		}
+		Path base = basePath();
+		for (PairAttachment a : pairAttachmentRepository.findBySession_IdAndPair_IdIn(sessionId, pairIds)) {
+			Path filePath = base.resolve(a.getStoredPath()).normalize();
+			if (!filePath.startsWith(base)) {
+				continue;
+			}
+			try {
+				Files.deleteIfExists(filePath);
+			} catch (IOException ignored) {
+				/* mejor esfuerzo: no bloquear reconciliación por un archivo bloqueado */
+			}
 		}
 	}
 

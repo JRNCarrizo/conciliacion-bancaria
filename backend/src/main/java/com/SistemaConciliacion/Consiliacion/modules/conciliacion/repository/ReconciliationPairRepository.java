@@ -31,4 +31,7 @@ public interface ReconciliationPairRepository extends JpaRepository<Reconciliati
 	List<ReconciliationPair> findAllWithPartiesBySessionId(@Param("sessionId") Long sessionId);
 
 	Optional<ReconciliationPair> findByIdAndSession_Id(Long id, Long sessionId);
+
+	@Query("SELECT p.id FROM ReconciliationPair p WHERE p.session.id = :sessionId AND p.matchSource = :source")
+	List<Long> findIdsBySessionIdAndMatchSource(@Param("sessionId") long sessionId, @Param("source") MatchSource source);
 }

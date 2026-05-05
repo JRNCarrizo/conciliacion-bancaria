@@ -109,6 +109,48 @@ html[data-theme='dark'] .app-navbar-logo-frame {
   margin-left: auto;
 }
 
+.app-navbar-chat-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.35rem;
+  height: 2.35rem;
+  padding: 0;
+  border: none;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--text-h);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.app-navbar-chat-btn:hover {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent);
+}
+
+.app-navbar-chat-icon {
+  display: block;
+}
+
+.app-navbar-chat-badge {
+  position: absolute;
+  top: -0.15rem;
+  right: -0.15rem;
+  min-width: 1.15rem;
+  height: 1.15rem;
+  padding: 0 0.28rem;
+  border-radius: 999px;
+  font-size: 0.62rem;
+  font-weight: 800;
+  line-height: 1.15rem;
+  text-align: center;
+  background: #dc2626;
+  color: #fff;
+  box-shadow: 0 0 0 2px var(--bg);
+}
+
 .app-navbar-theme.theme-toggle {
   flex-shrink: 0;
 }

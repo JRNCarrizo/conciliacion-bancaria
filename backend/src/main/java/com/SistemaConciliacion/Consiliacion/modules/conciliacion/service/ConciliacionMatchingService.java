@@ -13,6 +13,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import jakarta.persistence.EntityManager;
+
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.ConciliacionRunResultDto;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.BankTransaction;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.CompanyTransaction;
@@ -23,6 +25,7 @@ import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.SessionA
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.SessionStatus;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.repository.BankTransactionRepository;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.repository.CompanyTransactionRepository;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.repository.ReconciliationPairCommentRepository;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.repository.ReconciliationPairRepository;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.repository.ReconciliationSessionRepository;
 
@@ -35,18 +38,27 @@ public class ConciliacionMatchingService {
 	private final BankTransactionRepository bankTransactionRepository;
 	private final CompanyTransactionRepository companyTransactionRepository;
 	private final ReconciliationPairRepository reconciliationPairRepository;
+	private final ReconciliationPairCommentRepository reconciliationPairCommentRepository;
+	private final PairAttachmentService pairAttachmentService;
 	private final SessionAuditService sessionAuditService;
+	private final EntityManager entityManager;
 
 	public ConciliacionMatchingService(ReconciliationSessionRepository sessionRepository,
 			BankTransactionRepository bankTransactionRepository,
 			CompanyTransactionRepository companyTransactionRepository,
 			ReconciliationPairRepository reconciliationPairRepository,
-			SessionAuditService sessionAuditService) {
+			ReconciliationPairCommentRepository reconciliationPairCommentRepository,
+			PairAttachmentService pairAttachmentService,
+			SessionAuditService sessionAuditService,
+			EntityManager entityManager) {
 		this.sessionRepository = sessionRepository;
 		this.bankTransactionRepository = bankTransactionRepository;
 		this.companyTransactionRepository = companyTransactionRepository;
 		this.reconciliationPairRepository = reconciliationPairRepository;
+		this.reconciliationPairCommentRepository = reconciliationPairCommentRepository;
+		this.pairAttachmentService = pairAttachmentService;
 		this.sessionAuditService = sessionAuditService;
+		this.entityManager = entityManager;
 	}
 
 	@Transactional
@@ -66,6 +78,13 @@ public class ConciliacionMatchingService {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "La sesión está cerrada; no se puede conciliar.");
 		}
 
+		List<Long> autoPairIds = reconciliationPairRepository.findIdsBySessionIdAndMatchSource(sessionId,
+				MatchSource.AUTO);
+		if (!autoPairIds.isEmpty()) {
+			pairAttachmentService.deleteStoredFilesForPairs(sessionId, autoPairIds);
+			reconciliationPairCommentRepository.deleteAllByPair_IdIn(autoPairIds);
+			entityManager.flush();
+		}
 		reconciliationPairRepository.deleteBySession_IdAndMatchSource(sessionId, MatchSource.AUTO);
 
 		List<ReconciliationPair> manualPairs = reconciliationPairRepository.findBySession_IdAndMatchSource(sessionId,

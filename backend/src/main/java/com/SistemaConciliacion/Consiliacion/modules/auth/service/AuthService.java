@@ -38,7 +38,7 @@ public class AuthService {
 		appUserRepository.save(u);
 		return AuthResponseDto.of(
 				jwtService.generateToken(u.getUsername(), u.getRole(), u.getSessionVersion()),
-				u.getUsername(), u.getRole());
+				u.getUsername(), u.getRole(), u.getId());
 	}
 
 	@Transactional
@@ -60,6 +60,6 @@ public class AuthService {
 		appUserRepository.save(admin);
 		return AuthResponseDto.of(
 				jwtService.generateToken(admin.getUsername(), admin.getRole(), admin.getSessionVersion()),
-				admin.getUsername(), admin.getRole());
+				admin.getUsername(), admin.getRole(), admin.getId());
 	}
 }

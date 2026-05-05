@@ -1,5 +1,6 @@
 package com.SistemaConciliacion.Consiliacion.modules.conciliacion.repository;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -12,6 +13,8 @@ import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.PairAtta
 public interface PairAttachmentRepository extends JpaRepository<PairAttachment, Long> {
 
 	List<PairAttachment> findBySession_IdAndPair_IdOrderByCreatedAtAsc(long sessionId, long pairId);
+
+	List<PairAttachment> findBySession_IdAndPair_IdIn(long sessionId, Collection<Long> pairIds);
 
 	Optional<PairAttachment> findByIdAndSession_IdAndPair_Id(long id, long sessionId, long pairId);
 

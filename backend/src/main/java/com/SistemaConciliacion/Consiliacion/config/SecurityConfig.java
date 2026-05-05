@@ -52,6 +52,9 @@ public class SecurityConfig {
 						.hasAnyRole("ADMIN", "OPERADOR", "CONSULTA")
 						.requestMatchers("/api/v1/conciliacion/**").hasAnyRole("ADMIN", "OPERADOR")
 						.requestMatchers("/api/v1/users/**").hasRole("ADMIN")
+						.requestMatchers("/ws/**").permitAll()
+						.requestMatchers("/api/v1/chat/**")
+						.hasAnyRole("ADMIN", "OPERADOR", "CONSULTA")
 						// API cubierto arriba; resto: web estática + SPA
 						.anyRequest().permitAll())
 				.exceptionHandling(ex -> ex

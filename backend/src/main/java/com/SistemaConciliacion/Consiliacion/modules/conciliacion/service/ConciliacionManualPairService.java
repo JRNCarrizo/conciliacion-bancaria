@@ -1,5 +1,7 @@
 package com.SistemaConciliacion.Consiliacion.modules.conciliacion.service;
 
+import java.util.List;
+
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -14,6 +16,7 @@ import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.Reconcil
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.SessionStatus;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.repository.BankTransactionRepository;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.repository.CompanyTransactionRepository;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.repository.ReconciliationPairCommentRepository;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.repository.ReconciliationPairRepository;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.repository.ReconciliationSessionRepository;
 
@@ -24,15 +27,21 @@ public class ConciliacionManualPairService {
 	private final BankTransactionRepository bankTransactionRepository;
 	private final CompanyTransactionRepository companyTransactionRepository;
 	private final ReconciliationPairRepository reconciliationPairRepository;
+	private final ReconciliationPairCommentRepository reconciliationPairCommentRepository;
+	private final PairAttachmentService pairAttachmentService;
 
 	public ConciliacionManualPairService(ReconciliationSessionRepository sessionRepository,
 			BankTransactionRepository bankTransactionRepository,
 			CompanyTransactionRepository companyTransactionRepository,
-			ReconciliationPairRepository reconciliationPairRepository) {
+			ReconciliationPairRepository reconciliationPairRepository,
+			ReconciliationPairCommentRepository reconciliationPairCommentRepository,
+			PairAttachmentService pairAttachmentService) {
 		this.sessionRepository = sessionRepository;
 		this.bankTransactionRepository = bankTransactionRepository;
 		this.companyTransactionRepository = companyTransactionRepository;
 		this.reconciliationPairRepository = reconciliationPairRepository;
+		this.reconciliationPairCommentRepository = reconciliationPairCommentRepository;
+		this.pairAttachmentService = pairAttachmentService;
 	}
 
 	@Transactional
@@ -80,6 +89,8 @@ public class ConciliacionManualPairService {
 		if (p.getMatchSource() != MatchSource.MANUAL) {
 			throw new IllegalArgumentException("Solo se pueden eliminar vínculos manuales.");
 		}
+		pairAttachmentService.deleteStoredFilesForPairs(sessionId, List.of(pairId));
+		reconciliationPairCommentRepository.deleteByPair_Id(pairId);
 		reconciliationPairRepository.delete(p);
 	}
 }

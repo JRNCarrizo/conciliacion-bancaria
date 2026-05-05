@@ -53,6 +53,10 @@
 			<artifactId>spring-boot-starter-security</artifactId>
 		</dependency>
 		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-websocket</artifactId>
+		</dependency>
+		<dependency>
 			<groupId>io.jsonwebtoken</groupId>
 			<artifactId>jjwt-api</artifactId>
 			<version>0.12.6</version>
@@ -165,6 +169,24 @@
 						<configuration>
 							<arguments>run build</arguments>
 						</configuration>
+					</execution>
+				</executions>
+			</plugin>
+			<!--
+			  Vite escribe en src/main/resources/static en prepare-package, después del copy inicial
+			  (process-resources). Sin esta pasada extra, target/classes/static queda desactualizado
+			  y el jar falla con NoSuchFileException en assets con hash viejo.
+			-->
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-resources-plugin</artifactId>
+				<executions>
+					<execution>
+						<id>copy-resources-after-frontend-build</id>
+						<phase>prepare-package</phase>
+						<goals>
+							<goal>resources</goal>
+						</goals>
 					</execution>
 				</executions>
 			</plugin>

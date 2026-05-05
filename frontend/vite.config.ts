@@ -7,6 +7,10 @@ const backendStatic = '../backend/src/main/resources/static'
 
 export default defineConfig({
   plugins: [react()],
+  /** sockjs-client espera `global` (Node); en el navegador usar globalThis. */
+  define: {
+    global: 'globalThis',
+  },
   build: {
     outDir: backendStatic,
     emptyOutDir: true,
@@ -18,6 +22,11 @@ export default defineConfig({
         target: 'http://localhost:8080',
         changeOrigin: true,
       },
+      '/ws': {
+        target: 'http://localhost:8080',
+        ws: true,
+        changeOrigin: true,
+      },
     },
   },
   /** Mismo proxy que en dev: `vite preview` y pruebas del build necesitan llegar al backend en :8080 */
@@ -26,6 +35,11 @@ export default defineConfig({
     proxy: {
       '/api': {
         target: 'http://localhost:8080',
+        changeOrigin: true,
+      },
+      '/ws': {
+        target: 'http://localhost:8080',
+        ws: true,
         changeOrigin: true,
       },
     },

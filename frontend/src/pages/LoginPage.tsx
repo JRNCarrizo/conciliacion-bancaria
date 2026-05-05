@@ -10,6 +10,7 @@ type LoginJson = {
   token: string
   username: string
   role: AppRole
+  userId: number
 }
 
 export function LoginPage() {
@@ -38,7 +39,7 @@ export function LoginPage() {
       })
       if (!r.ok) throw new Error(await parseError(r))
       const data = (await r.json()) as LoginJson
-      const u: AuthUser = { username: data.username, role: data.role }
+      const u: AuthUser = { username: data.username, role: data.role, userId: data.userId }
       setSession(data.token, u)
       navigate(from === '/login' ? '/' : from, { replace: true })
     } catch (err) {

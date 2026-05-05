@@ -17,7 +17,7 @@ function readStoredUser(): AuthUser | null {
     const raw = localStorage.getItem(AUTH_USER_KEY)
     if (!raw) return null
     const o = JSON.parse(raw) as AuthUser
-    if (o?.username && o?.role) return o
+    if (o?.username && o?.role && typeof o.userId === 'number') return o as AuthUser
     return null
   } catch {
     return null
