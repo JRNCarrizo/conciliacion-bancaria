@@ -3008,15 +3008,18 @@ export default function ConciliacionPage() {
     ) {
       return
     }
-    const reason = window.prompt('Motivo (opcional; queda en el historial de auditoría):', '')
-    if (reason === null) return
+    const reasonRaw = window.prompt(
+      'Motivo opcional (si lo escribís queda en Actividad). Podés dejar vacío o Cancelar para reabrir sin motivo.',
+      '',
+    )
+    const reason = reasonRaw !== null && reasonRaw.trim() !== '' ? reasonRaw.trim() : null
     setReopenSessionLoading(true)
     setDetailError(null)
     try {
       const r = await apiFetch(`/api/v1/conciliacion/sessions/${selectedId}/reapertura`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reason: reason.trim() || null }),
+        body: JSON.stringify({ reason }),
       })
       if (!r.ok) throw new Error(await parseError(r))
       await loadDetail(selectedId, { soft: true })
