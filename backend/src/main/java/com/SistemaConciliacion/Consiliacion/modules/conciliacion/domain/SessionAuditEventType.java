@@ -8,5 +8,7 @@ public enum SessionAuditEventType {
 	/** Solo administrador: vuelve a habilitar edición tras un cierre. */
 	REOPEN_SESSION,
 	/** Apertura explícita del detalle (GET con recordAccess); no incluye refrescos silenciosos en UI. */
-	VIEW_DETAIL
+	VIEW_DETAIL,
+	/** Quitar un vínculo manual o automático; los movimientos vuelven a pendientes. */
+	UNLINK_PAIR
 }

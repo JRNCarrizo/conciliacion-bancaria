@@ -79,6 +79,7 @@ public class SessionAuditService {
 			case CLOSE_SESSION -> "Cerró la sesión";
 			case REOPEN_SESSION -> "Reabrió la sesión";
 			case VIEW_DETAIL -> "Abrió el detalle de la sesión";
+			case UNLINK_PAIR -> "Desvinculó un par";
 		};
 	}
 }

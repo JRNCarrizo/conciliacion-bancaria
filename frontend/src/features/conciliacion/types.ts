@@ -56,6 +56,8 @@ export type ImportResult = {
   companyRows: number
   sourceBankFileName: string
   sourceCompanyFileName: string
+  bankFileCount: number
+  companyFileCount: number
 }
 
 export type SessionSummary = {

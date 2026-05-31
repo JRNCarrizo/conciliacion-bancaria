@@ -83,6 +83,15 @@ class ConciliacionImportIntegrationTest {
 		JsonNode root = MAPPER.readTree(body);
 		long sessionId = root.get("sessionId").asLong();
 
+		MockMultipartFile bank2 = new MockMultipartFile("bank", "Octubre-Banco-2.xls", "application/vnd.ms-excel",
+				bankBytes);
+		mockMvc.perform(multipart("/api/v1/conciliacion/import").file(bank).file(bank2).file(company)
+				.header(HttpHeaders.AUTHORIZATION, auth))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.bankFileCount").value(2))
+				.andExpect(jsonPath("$.companyFileCount").value(1))
+				.andExpect(jsonPath("$.bankRows").value(greaterThan(0)));
+
 		mockMvc.perform(post("/api/v1/conciliacion/sessions/{id}/conciliar", sessionId).param("dateToleranceDays", "5")
 				.param("amountTolerance", "0.01")
 				.header(HttpHeaders.AUTHORIZATION, auth))

@@ -13,6 +13,7 @@ import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.CompanyT
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.MatchSource;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.ReconciliationPair;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.ReconciliationSession;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.SessionAuditEventType;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.SessionStatus;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.repository.BankTransactionRepository;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.repository.CompanyTransactionRepository;
@@ -29,19 +30,21 @@ public class ConciliacionManualPairService {
 	private final ReconciliationPairRepository reconciliationPairRepository;
 	private final ReconciliationPairCommentRepository reconciliationPairCommentRepository;
 	private final PairAttachmentService pairAttachmentService;
+	private final SessionAuditService sessionAuditService;
 
 	public ConciliacionManualPairService(ReconciliationSessionRepository sessionRepository,
 			BankTransactionRepository bankTransactionRepository,
 			CompanyTransactionRepository companyTransactionRepository,
 			ReconciliationPairRepository reconciliationPairRepository,
 			ReconciliationPairCommentRepository reconciliationPairCommentRepository,
-			PairAttachmentService pairAttachmentService) {
+			PairAttachmentService pairAttachmentService, SessionAuditService sessionAuditService) {
 		this.sessionRepository = sessionRepository;
 		this.bankTransactionRepository = bankTransactionRepository;
 		this.companyTransactionRepository = companyTransactionRepository;
 		this.reconciliationPairRepository = reconciliationPairRepository;
 		this.reconciliationPairCommentRepository = reconciliationPairCommentRepository;
 		this.pairAttachmentService = pairAttachmentService;
+		this.sessionAuditService = sessionAuditService;
 	}
 
 	@Transactional
@@ -78,7 +81,7 @@ public class ConciliacionManualPairService {
 	}
 
 	@Transactional
-	public void deleteManualPair(long sessionId, long pairId) {
+	public void deletePair(long sessionId, long pairId) {
 		ReconciliationSession session = sessionRepository.findById(sessionId)
 				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sesión no encontrada"));
 		if (session.getStatus() == SessionStatus.CLOSED) {
@@ -86,11 +89,13 @@ public class ConciliacionManualPairService {
 		}
 		ReconciliationPair p = reconciliationPairRepository.findByIdAndSession_Id(pairId, sessionId)
 				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Par no encontrado."));
-		if (p.getMatchSource() != MatchSource.MANUAL) {
-			throw new IllegalArgumentException("Solo se pueden eliminar vínculos manuales.");
-		}
+		long bankId = p.getBankTransaction().getId();
+		long companyId = p.getCompanyTransaction().getId();
+		String source = p.getMatchSource() == MatchSource.MANUAL ? "manual" : "automático";
 		pairAttachmentService.deleteStoredFilesForPairs(sessionId, List.of(pairId));
 		reconciliationPairCommentRepository.deleteByPair_Id(pairId);
 		reconciliationPairRepository.delete(p);
+		sessionAuditService.append(sessionId, SessionAuditEventType.UNLINK_PAIR,
+				String.format("Par %d · %s · banco %d · empresa %d", pairId, source, bankId, companyId));
 	}
 }

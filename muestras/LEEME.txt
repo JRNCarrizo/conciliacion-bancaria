@@ -15,8 +15,18 @@ Datos de ejemplo
 ----------------
 - Tres movimientos están pensados para emparejar entre sí (mismos importes y fechas cercanas).
 - Un movimiento solo en libro y otro solo en banco sirven para probar pendientes / diferencias.
+- Tres débitos EDESUR en banco (−15.000 c/u) y dos en libro (25.000 + 20.000): asigná clasificación «LUZ»
+  a esas cinco filas en Comparativa y abrí la pestaña «Por rubro» (Σ banco −45.000 vs Σ empresa −45.000).
+
+Vista por rubro
+---------------
+En el detalle de sesión: pestaña «Por rubro».
+- «Mismo detalle en registro»: agrupa solo si descripción/referencia coincide (automático).
+- «Por clasificación»: agrupa por Clasif. (ej. LUZ en todas las líneas de servicios).
+Regenerá los xlsx con: py -3 generar_muestras.py
 
 Import en la app
 ----------------
 En Importar: seleccioná "muestra-extracto-banco.xlsx" como banco y "muestra-plataforma-empresa.xlsx" como empresa/plataforma.
+Podés elegir varios archivos de cada lado (mismo layout); se crea una sola sesión.
 No hace falta mapeo personalizado si dejás los valores por defecto del formulario.

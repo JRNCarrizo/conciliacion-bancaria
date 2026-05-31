@@ -10,7 +10,7 @@ from pathlib import Path
 from openpyxl import Workbook
 from openpyxl.styles import Font
 
-OUT_DIR = Path(__file__).resolve().parent
+OUT_DIR = Path(__file__).resolve().parent / "excel"
 
 COMPANY_HEADERS = [
     "Fecha\ncontable",
@@ -108,6 +108,38 @@ def build_company() -> None:
             "Varios",
             "20000000000",
         ),
+        (
+            datetime(2025, 1, 11),
+            1,
+            "OP",
+            2010,
+            datetime(2025, 1, 11),
+            0,
+            25000,
+            1_035_000,
+            "",
+            "EDESUR luz enero",
+            "Proveedor",
+            "20",
+            "Servicios",
+            "30111222333",
+        ),
+        (
+            datetime(2025, 1, 13),
+            1,
+            "OP",
+            2011,
+            datetime(2025, 1, 13),
+            0,
+            20000,
+            1_015_000,
+            "",
+            "EPEC luz enero",
+            "Proveedor",
+            "20",
+            "Servicios",
+            "30111222333",
+        ),
     ]
     for row in data:
         ws.append(list(row))
@@ -130,11 +162,15 @@ def build_bank() -> None:
     for c in range(1, 8):
         ws.cell(row=8, column=c).font = Font(bold=True)
 
+    # Tres débitos EDESUR (−15.000 c/u) + dos en libro con observación luz: probar vista «Por rubro» (clasif. LUZ).
     movs = [
         (datetime(2025, 1, 15), "DEB", "001", "TRF-001", "Pago Proveedor Demo SA", "Transferencia saliente", -25000),
         (datetime(2025, 1, 20), "VAR", "002", "IMP-445", "Débitos varios", "Impuesto / servicio", -15000),
         (datetime(2025, 1, 22), "CRE", "003", "DEP-CH", "Cobranza cliente", "Acreditación", 80000),
         (datetime(2025, 1, 25), "COM", "099", "COM-MES", "Comisión bancaria", "Solo en banco (sin par en libro muestra)", -999),
+        (datetime(2025, 1, 10), "DEB", "010", "LUZ-01", "EDESUR servicio electricidad", "Enero", -15000),
+        (datetime(2025, 1, 12), "DEB", "011", "LUZ-02", "EDESUR servicio electricidad", "Enero refact.", -15000),
+        (datetime(2025, 1, 14), "DEB", "012", "LUZ-03", "EDESUR servicio electricidad", "Enero ajuste", -15000),
     ]
     for m in movs:
         ws.append(list(m))

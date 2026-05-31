@@ -730,8 +730,8 @@ public class ConciliacionSessionService {
 
 	/**
 	 * Pendientes con importe cercano y fecha en ventana (no emparejados por la corrida automática).
-	 * Tolerancia: max(8% del |importe banco|, 100) — sin tope fijo grande, para no sugerir pares con
-	 * montos muy distintos (p. ej. −999 vs −5000); el % cubre importes altos.
+	 * Tolerancia de importe: min(3% del |importe banco|, 10.000), con piso 100 — evita sugerencias
+	 * absurdas en montos altos (p. ej. 2M de diferencia) y mantiene margen para redondeos chicos.
 	 */
 	private static Map<Long, Long> computeFuzzyCandidatesBankToCompany(List<BankTransaction> unmatchedBanks,
 			List<CompanyTransaction> unmatchedCompanies) {
@@ -739,8 +739,9 @@ public class ConciliacionSessionService {
 		if (unmatchedBanks.isEmpty() || unmatchedCompanies.isEmpty()) {
 			return out;
 		}
-		BigDecimal maxPct = new BigDecimal("0.08");
+		BigDecimal maxPct = new BigDecimal("0.03");
 		BigDecimal minRounding = new BigDecimal("100");
+		BigDecimal absoluteCap = new BigDecimal("10000");
 		int maxDays = 10;
 		for (BankTransaction b : unmatchedBanks) {
 			CompanyTransaction best = null;
@@ -751,7 +752,7 @@ public class ConciliacionSessionService {
 					continue;
 				}
 				BigDecimal diff = b.getAmount().subtract(c.getAmount()).abs();
-				BigDecimal ceiling = b.getAmount().abs().multiply(maxPct).max(minRounding);
+				BigDecimal ceiling = b.getAmount().abs().multiply(maxPct).min(absoluteCap).max(minRounding);
 				if (diff.compareTo(ceiling) > 0) {
 					continue;
 				}

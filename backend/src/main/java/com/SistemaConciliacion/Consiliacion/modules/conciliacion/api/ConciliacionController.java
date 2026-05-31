@@ -101,8 +101,8 @@ public class ConciliacionController {
 	}
 
 	@PostMapping(value = "/import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-	public ConciliacionImportService.ImportResult importFiles(@RequestParam("bank") MultipartFile bank,
-			@RequestParam("company") MultipartFile company,
+	public ConciliacionImportService.ImportResult importFiles(@RequestParam("bank") List<MultipartFile> bankFiles,
+			@RequestParam("company") List<MultipartFile> companyFiles,
 			@RequestParam(value = "layout", required = false) String layoutJson) throws IOException {
 		ImportLayoutDto layout = null;
 		if (layoutJson != null && !layoutJson.isBlank()) {
@@ -112,7 +112,7 @@ public class ConciliacionController {
 				throw new IllegalArgumentException("Parámetro layout: JSON inválido.");
 			}
 		}
-		return conciliacionImportService.importFiles(bank, company, layout);
+		return conciliacionImportService.importFiles(bankFiles, companyFiles, layout);
 	}
 
 	@GetMapping("/sessions")
@@ -283,14 +283,16 @@ public class ConciliacionController {
 		return conciliacionMatchingService.reconcile(id, dateToleranceDays, amountTolerance);
 	}
 
+	@PreAuthorize("hasAnyRole('ADMIN', 'OPERADOR')")
 	@PostMapping(value = "/sessions/{id}/pares", consumes = MediaType.APPLICATION_JSON_VALUE)
 	public ManualPairResponseDto createManualPair(@PathVariable long id, @RequestBody ManualPairRequestDto body) {
 		return conciliacionManualPairService.createManualPair(id, body.bankTransactionId(), body.companyTransactionId());
 	}
 
+	@PreAuthorize("hasAnyRole('ADMIN', 'OPERADOR')")
 	@DeleteMapping("/sessions/{id}/pares/{pairId}")
-	public ResponseEntity<Void> deleteManualPair(@PathVariable long id, @PathVariable long pairId) {
-		conciliacionManualPairService.deleteManualPair(id, pairId);
+	public ResponseEntity<Void> deletePair(@PathVariable long id, @PathVariable long pairId) {
+		conciliacionManualPairService.deletePair(id, pairId);
 		return ResponseEntity.noContent().build();
 	}
 

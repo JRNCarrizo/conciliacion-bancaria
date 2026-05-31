@@ -2,7 +2,9 @@ package com.SistemaConciliacion.Consiliacion.modules.conciliacion.service;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
@@ -28,6 +30,8 @@ import com.SistemaConciliacion.Consiliacion.modules.conciliacion.repository.Reco
 @Service
 public class ConciliacionImportService {
 
+	private static final int MAX_SOURCE_NAME_LEN = 255;
+
 	private final ReconciliationSessionRepository sessionRepository;
 	private final BankTransactionRepository bankTransactionRepository;
 	private final CompanyTransactionRepository companyTransactionRepository;
@@ -50,20 +54,14 @@ public class ConciliacionImportService {
 	}
 
 	/**
-	 * Carga ambos libros con {@link WorkbookFactory}: acepta .xls (BIFF) y .xlsx (OOXML) en cada
-	 * archivo. Por defecto el layout es el de {@link BancoWorkbookParser} / {@link PlataformaWorkbookParser}
-	 * (primera hoja). Opcionalmente {@code layout} permite filas/columnas distintas.
+	 * Carga uno o más libros por lado en una sola sesión (mismo layout en todos).
+	 * Acepta .xls y .xlsx vía {@link WorkbookFactory}.
 	 */
 	@Transactional
-	public ImportResult importFiles(MultipartFile bankFile, MultipartFile companyFile) throws IOException {
-		return importFiles(bankFile, companyFile, null);
-	}
-
-	@Transactional
-	public ImportResult importFiles(MultipartFile bankFile, MultipartFile companyFile, ImportLayoutDto layout)
-			throws IOException {
-		validateMultipart(bankFile, "banco");
-		validateMultipart(companyFile, "plataforma");
+	public ImportResult importFiles(List<MultipartFile> bankFiles, List<MultipartFile> companyFiles,
+			ImportLayoutDto layout) throws IOException {
+		List<MultipartFile> banks = nonEmptyParts(bankFiles, "banco");
+		List<MultipartFile> companies = nonEmptyParts(companyFiles, "plataforma");
 
 		BankGridLayout bankLayout = ImportLayoutResolver.resolveBank(layout);
 		CompanyGridLayout companyLayout = ImportLayoutResolver.resolveCompany(layout);
@@ -71,42 +69,92 @@ public class ConciliacionImportService {
 		companyLayout.validate();
 
 		ReconciliationSession session = new ReconciliationSession();
-		session.setSourceBankFileName(bankFile.getOriginalFilename());
-		session.setSourceCompanyFileName(companyFile.getOriginalFilename());
+		session.setSourceBankFileName(joinFileNames(banks));
+		session.setSourceCompanyFileName(joinFileNames(companies));
 		session.setStatus(SessionStatus.IMPORTED);
 		session = sessionRepository.save(session);
 
-		try (InputStream bankIs = bankFile.getInputStream();
-				InputStream companyIs = companyFile.getInputStream();
-				Workbook bankWb = WorkbookFactory.create(bankIs);
-				Workbook companyWb = WorkbookFactory.create(companyIs)) {
+		List<BankTransaction> allBankRows = new ArrayList<>();
+		for (MultipartFile bankFile : banks) {
+			allBankRows.addAll(parseBankWorkbook(bankFile, session, bankLayout));
+		}
+		List<CompanyTransaction> allCompanyRows = new ArrayList<>();
+		for (MultipartFile companyFile : companies) {
+			allCompanyRows.addAll(parseCompanyWorkbook(companyFile, session, companyLayout));
+		}
+
+		if (allBankRows.isEmpty()) {
+			throw new IllegalArgumentException("No se encontraron movimientos de banco en los archivos enviados.");
+		}
+		if (allCompanyRows.isEmpty()) {
+			throw new IllegalArgumentException("No se encontraron movimientos de plataforma en los archivos enviados.");
+		}
+
+		bankTransactionRepository.saveAll(allBankRows);
+		companyTransactionRepository.saveAll(allCompanyRows);
+
+		String auditDetail = importDetail(session.getSourceBankFileName(), session.getSourceCompanyFileName(),
+				banks.size(), companies.size());
+		sessionAuditService.append(session.getId(), SessionAuditEventType.IMPORT, auditDetail);
+
+		return new ImportResult(session.getId(), allBankRows.size(), allCompanyRows.size(),
+				session.getSourceBankFileName(), session.getSourceCompanyFileName(), banks.size(),
+				companies.size());
+	}
+
+	private List<BankTransaction> parseBankWorkbook(MultipartFile bankFile, ReconciliationSession session,
+			BankGridLayout bankLayout) throws IOException {
+		try (InputStream bankIs = bankFile.getInputStream(); Workbook bankWb = WorkbookFactory.create(bankIs)) {
 			Sheet bankSheet = sheetAt(bankWb, bankLayout.sheetIndex());
-			Sheet companySheet = sheetAt(companyWb, companyLayout.sheetIndex());
-
-			List<BankTransaction> bankRows = bancoWorkbookParser.parse(bankSheet, session, bankLayout);
-			List<CompanyTransaction> companyRows = plataformaWorkbookParser.parse(companySheet, session, companyLayout);
-
-			bankTransactionRepository.saveAll(bankRows);
-			companyTransactionRepository.saveAll(companyRows);
-
-			String auditDetail = importDetail(session.getSourceBankFileName(), session.getSourceCompanyFileName());
-			sessionAuditService.append(session.getId(), SessionAuditEventType.IMPORT, auditDetail);
-
-			return new ImportResult(session.getId(), bankRows.size(), companyRows.size(),
-					session.getSourceBankFileName(), session.getSourceCompanyFileName());
+			return bancoWorkbookParser.parse(bankSheet, session, bankLayout);
 		}
 	}
 
-	private static String importDetail(String bankName, String companyName) {
+	private List<CompanyTransaction> parseCompanyWorkbook(MultipartFile companyFile, ReconciliationSession session,
+			CompanyGridLayout companyLayout) throws IOException {
+		try (InputStream companyIs = companyFile.getInputStream();
+				Workbook companyWb = WorkbookFactory.create(companyIs)) {
+			Sheet companySheet = sheetAt(companyWb, companyLayout.sheetIndex());
+			return plataformaWorkbookParser.parse(companySheet, session, companyLayout);
+		}
+	}
+
+	private static List<MultipartFile> nonEmptyParts(List<MultipartFile> files, String role) {
+		if (files == null || files.isEmpty()) {
+			throw new IllegalArgumentException("Falta al menos un archivo de " + role + ".");
+		}
+		List<MultipartFile> out = files.stream().filter(f -> f != null && !f.isEmpty()).collect(Collectors.toList());
+		if (out.isEmpty()) {
+			throw new IllegalArgumentException("Falta al menos un archivo de " + role + ".");
+		}
+		return out;
+	}
+
+	private static String joinFileNames(List<MultipartFile> files) {
+		List<String> names = files.stream().map(MultipartFile::getOriginalFilename).filter(n -> n != null && !n.isBlank())
+				.toList();
+		if (names.isEmpty()) {
+			return "—";
+		}
+		if (names.size() == 1) {
+			return truncate(names.get(0), MAX_SOURCE_NAME_LEN);
+		}
+		String joined = String.join("; ", names);
+		String withCount = names.size() + " archivos: " + joined;
+		return truncate(withCount, MAX_SOURCE_NAME_LEN);
+	}
+
+	private static String truncate(String s, int max) {
+		if (s.length() <= max) {
+			return s;
+		}
+		return s.substring(0, max - 1) + "…";
+	}
+
+	private static String importDetail(String bankName, String companyName, int bankFiles, int companyFiles) {
 		String b = bankName != null && !bankName.isBlank() ? bankName : "—";
 		String c = companyName != null && !companyName.isBlank() ? companyName : "—";
-		return "Banco: " + b + " · Empresa: " + c;
-	}
-
-	private static void validateMultipart(MultipartFile file, String role) {
-		if (file == null || file.isEmpty()) {
-			throw new IllegalArgumentException("Falta el archivo de " + role + ".");
-		}
+		return "Banco (" + bankFiles + "): " + b + " · Empresa (" + companyFiles + "): " + c;
 	}
 
 	private static Sheet sheetAt(Workbook wb, int index) {
@@ -121,6 +169,6 @@ public class ConciliacionImportService {
 	}
 
 	public record ImportResult(long sessionId, int bankRows, int companyRows, String sourceBankFileName,
-			String sourceCompanyFileName) {
+			String sourceCompanyFileName, int bankFileCount, int companyFileCount) {
 	}
 }

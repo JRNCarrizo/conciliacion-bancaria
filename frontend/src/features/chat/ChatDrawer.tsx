@@ -6,7 +6,10 @@ import { useAuth } from '../../auth/AuthContext'
 import { parseError } from '../conciliacion/api/http'
 import './chat-drawer.css'
 import './chat.css'
+import { composeChatMessageBody } from '../conciliacion/utils/shareLink'
+import type { ConciliacionShareRef } from '../conciliacion/utils/shareLink'
 import { CHAT_NOTIFY_EVENT, useChatPanel } from './ChatPanelContext'
+import { ChatMessageBody } from './ChatMessageBody'
 import type { ChatContact, ChatConversation, ChatMessage } from './types'
 
 function normalizeMessage(raw: ChatMessage): ChatMessage {
@@ -32,7 +35,7 @@ function normalizeContact(raw: ChatContact): ChatContact {
 }
 
 export function ChatDrawer() {
-  const { open, setOpen, refreshUnread } = useChatPanel()
+  const { open, setOpen, refreshUnread, consumePendingShare } = useChatPanel()
   const { user } = useAuth()
   const myId = user?.userId
 
@@ -47,6 +50,9 @@ export function ChatDrawer() {
 
   const stompRef = useRef<Client | null>(null)
   const messagesScrollRef = useRef<HTMLDivElement>(null)
+  const composeInputRef = useRef<HTMLInputElement>(null)
+  const [composeAttachment, setComposeAttachment] = useState<ConciliacionShareRef | null>(null)
+  const shareBootRef = useRef(false)
 
   const loadLists = useCallback(async () => {
     setListError(null)
@@ -60,13 +66,53 @@ export function ChatDrawer() {
     }
   }, [])
 
+  const openWithPeer = useCallback(async (peerUserId: number) => {
+    setListError(null)
+    try {
+      const r = await apiFetch('/api/v1/chat/conversations/open', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ peerUserId }),
+      })
+      if (!r.ok) throw new Error(await parseError(r))
+      const conv = (await r.json()) as ChatConversation
+      setActive(conv)
+      setScreen('thread')
+      void loadLists()
+      return conv
+    } catch (e) {
+      setListError(e instanceof Error ? e.message : String(e))
+      return null
+    }
+  }, [loadLists])
+
+  const openWithPeerForShare = useCallback(
+    async (peerUserId: number) => {
+      const conv = await openWithPeer(peerUserId)
+      if (conv) {
+        window.requestAnimationFrame(() => composeInputRef.current?.focus())
+      }
+    },
+    [openWithPeer],
+  )
+
   useEffect(() => {
-    if (!open) return
-    void loadLists().then(() => {
+    if (!open) {
+      shareBootRef.current = false
+      setComposeAttachment(null)
+      return
+    }
+    void loadLists()
+    const ps = consumePendingShare()
+    if (ps) {
+      shareBootRef.current = true
+      setComposeAttachment(ps.shareRef)
+      void openWithPeerForShare(ps.peerUserId)
+    } else if (!shareBootRef.current) {
       setScreen('picker')
       setActive(null)
-    })
-  }, [open, loadLists])
+    }
+  }, [open, loadLists, consumePendingShare, openWithPeerForShare])
 
   useEffect(() => {
     if (!open) return
@@ -204,24 +250,6 @@ export function ChatDrawer() {
     }
   }, [active, myId, loadLists, open, screen, refreshUnread])
 
-  async function openWithPeer(peerUserId: number) {
-    setListError(null)
-    try {
-      const r = await apiFetch('/api/v1/chat/conversations/open', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ peerUserId }),
-      })
-      if (!r.ok) throw new Error(await parseError(r))
-      const conv = (await r.json()) as ChatConversation
-      setActive(conv)
-      setScreen('thread')
-      void loadLists()
-    } catch (e) {
-      setListError(e instanceof Error ? e.message : String(e))
-    }
-  }
-
   function pickConversation(t: ChatConversation) {
     setActive(t)
     setScreen('thread')
@@ -244,23 +272,27 @@ export function ChatDrawer() {
   function send(e: FormEvent) {
     e.preventDefault()
     const text = draft.trim()
-    if (!text || !active) return
+    if ((!text && !composeAttachment) || !active) return
     const client = stompRef.current
     if (!client?.connected) {
       setSendHint('Sin conexión todavía; esperá un instante.')
       return
     }
+    const body = composeChatMessageBody(text, composeAttachment)
     client.publish({
       destination: '/app/chat.send',
-      body: JSON.stringify({ conversationId: active.id, body: text }),
+      body: JSON.stringify({ conversationId: active.id, body }),
     })
     setDraft('')
+    setComposeAttachment(null)
     setSendHint(null)
     void refreshUnread()
     void loadLists()
   }
 
   function backToPicker() {
+    shareBootRef.current = false
+    setComposeAttachment(null)
     setScreen('picker')
     setActive(null)
     void loadLists()
@@ -333,7 +365,7 @@ export function ChatDrawer() {
                           hour12: false,
                         })}
                       </div>
-                      <div className="chat-bubble-text">{m.body}</div>
+                      <ChatMessageBody body={m.body} />
                       {mine ? (
                         <div className="chat-bubble-ticks-wrap">
                           <span
@@ -351,16 +383,42 @@ export function ChatDrawer() {
               </div>
               {sendHint ? <p className="chat-muted">{sendHint}</p> : null}
               <form className="chat-compose chat-drawer-compose" onSubmit={send}>
-                <input
-                  value={draft}
-                  onChange={(ev) => setDraft(ev.target.value)}
-                  placeholder="Mensaje…"
-                  maxLength={4000}
-                  autoComplete="off"
-                />
-                <button type="submit" className="btn-secondary">
-                  Enviar
-                </button>
+                {composeAttachment ? (
+                  <div className="chat-compose-attachment">
+                    <div className="chat-compose-attachment-text">
+                      <span className="chat-compose-attachment-kicker">Conciliación</span>
+                      <span className="chat-compose-attachment-label">{composeAttachment.label}</span>
+                      {composeAttachment.detail ? (
+                        <span className="chat-compose-attachment-detail">{composeAttachment.detail}</span>
+                      ) : null}
+                    </div>
+                    <button
+                      type="button"
+                      className="chat-compose-attachment-remove"
+                      onClick={() => setComposeAttachment(null)}
+                      aria-label="Quitar referencia"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ) : null}
+                <div className="chat-compose-row">
+                  <input
+                    ref={composeInputRef}
+                    value={draft}
+                    onChange={(ev) => setDraft(ev.target.value)}
+                    placeholder={composeAttachment ? 'Agregá un mensaje (opcional)…' : 'Mensaje…'}
+                    maxLength={4000}
+                    autoComplete="off"
+                  />
+                  <button
+                    type="submit"
+                    className="btn-secondary"
+                    disabled={!draft.trim() && !composeAttachment}
+                  >
+                    Enviar
+                  </button>
+                </div>
               </form>
             </div>
           </>

@@ -5,18 +5,29 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react'
 import SockJS from 'sockjs-client'
 import { apiFetch, getStoredToken } from '../../api/client'
 import { useAuth } from '../../auth/AuthContext'
+import type { ConciliacionShareRef } from '../conciliacion/utils/shareLink'
 
 type ChatPanelContextValue = {
   open: boolean
   setOpen: (open: boolean) => void
   unreadTotal: number
   refreshUnread: () => Promise<void>
+  /** Abre chat con contacto y tarjeta de conciliación lista para enviar. */
+  openChatWithShare: (peerUserId: number, shareRef: ConciliacionShareRef) => void
+  /** Consumido por ChatDrawer al abrir el hilo. */
+  consumePendingShare: () => { peerUserId: number; shareRef: ConciliacionShareRef } | null
+}
+
+export type ChatPendingShare = {
+  peerUserId: number
+  shareRef: ConciliacionShareRef
 }
 
 /** Disparado en cada frame de `/topic/chat.notify.*` para sincronizar UI (p. ej. lista del drawer). */
@@ -28,6 +39,7 @@ export function ChatPanelProvider({ children }: { children: ReactNode }) {
   const { isAuthenticated, user } = useAuth()
   const [open, setOpen] = useState(false)
   const [unreadTotal, setUnreadTotal] = useState(0)
+  const pendingShareRef = useRef<ChatPendingShare | null>(null)
 
   const refreshUnread = useCallback(async () => {
     if (!getStoredToken()) return
@@ -36,6 +48,17 @@ export function ChatPanelProvider({ children }: { children: ReactNode }) {
       const j = (await r.json()) as { count: number }
       setUnreadTotal(typeof j.count === 'number' ? j.count : 0)
     }
+  }, [])
+
+  const openChatWithShare = useCallback((peerUserId: number, shareRef: ConciliacionShareRef) => {
+    pendingShareRef.current = { peerUserId, shareRef }
+    setOpen(true)
+  }, [])
+
+  const consumePendingShare = useCallback(() => {
+    const ps = pendingShareRef.current
+    pendingShareRef.current = null
+    return ps
   }, [])
 
   useEffect(() => {
@@ -86,8 +109,10 @@ export function ChatPanelProvider({ children }: { children: ReactNode }) {
       setOpen,
       unreadTotal,
       refreshUnread,
+      openChatWithShare,
+      consumePendingShare,
     }),
-    [open, unreadTotal, refreshUnread],
+    [open, unreadTotal, refreshUnread, openChatWithShare, consumePendingShare],
   )
 
   return <ChatPanelContext.Provider value={value}>{children}</ChatPanelContext.Provider>
