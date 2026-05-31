@@ -2,8 +2,12 @@ package com.SistemaConciliacion.Consiliacion.modules.conciliacion.service;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.stream.Collectors;
 
 import org.apache.poi.ss.usermodel.Sheet;
@@ -31,6 +35,7 @@ import com.SistemaConciliacion.Consiliacion.modules.conciliacion.repository.Reco
 public class ConciliacionImportService {
 
 	private static final int MAX_SOURCE_NAME_LEN = 255;
+	private static final ZoneId APP_ZONE = ZoneId.of("America/Argentina/Buenos_Aires");
 
 	private final ReconciliationSessionRepository sessionRepository;
 	private final BankTransactionRepository bankTransactionRepository;
@@ -72,6 +77,8 @@ public class ConciliacionImportService {
 		session.setSourceBankFileName(joinFileNames(banks));
 		session.setSourceCompanyFileName(joinFileNames(companies));
 		session.setStatus(SessionStatus.IMPORTED);
+		session = sessionRepository.save(session);
+		session.setDisplayName(defaultDisplayName(session.getCreatedAt()));
 		session = sessionRepository.save(session);
 
 		List<BankTransaction> allBankRows = new ArrayList<>();
@@ -149,6 +156,13 @@ public class ConciliacionImportService {
 			return s;
 		}
 		return s.substring(0, max - 1) + "…";
+	}
+
+	private static String defaultDisplayName(Instant createdAt) {
+		Instant when = createdAt != null ? createdAt : Instant.now();
+		String monthYear = DateTimeFormatter.ofPattern("MMM yyyy", Locale.forLanguageTag("es-AR"))
+				.format(when.atZone(APP_ZONE));
+		return "Conciliación · " + monthYear;
 	}
 
 	private static String importDetail(String bankName, String companyName, int bankFiles, int companyFiles) {

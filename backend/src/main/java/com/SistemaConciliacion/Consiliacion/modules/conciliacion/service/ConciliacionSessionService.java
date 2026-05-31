@@ -9,6 +9,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 import org.springframework.data.domain.Page;
@@ -92,8 +93,8 @@ public class ConciliacionSessionService {
 		long bankCount = bankTransactionRepository.countBySession_Id(bid);
 		long companyCount = companyTransactionRepository.countBySession_Id(bid);
 		long matched = reconciliationPairRepository.countBySession_Id(bid);
-		return new SessionSummaryDto(bid, s.getCreatedAt(), s.getSourceBankFileName(), s.getSourceCompanyFileName(),
-				s.getStatus().name(), bankCount, companyCount, matched);
+		return new SessionSummaryDto(bid, s.getCreatedAt(), s.getDisplayName(), s.getSourceBankFileName(),
+				s.getSourceCompanyFileName(), s.getStatus().name(), bankCount, companyCount, matched);
 	}
 
 	@Transactional(readOnly = true)
@@ -188,6 +189,28 @@ public class ConciliacionSessionService {
 
 		return new SessionDetailDto(toHeader(s), bankDtos, companyDtos, unmatchedBank, unmatchedCompany, parDtos,
 				stats);
+	}
+
+	@Transactional
+	public SessionHeaderDto updateDisplayName(long sessionId, String displayName) {
+		ReconciliationSession s = sessionRepository.findById(sessionId)
+				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sesión no encontrada"));
+		String trimmed = displayName == null ? null : displayName.trim();
+		if (trimmed != null && trimmed.isEmpty()) {
+			trimmed = null;
+		}
+		if (trimmed != null && trimmed.length() > 120) {
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+					"El nombre no puede superar 120 caracteres.");
+		}
+		String previous = s.getDisplayName();
+		if (Objects.equals(previous, trimmed)) {
+			return toHeader(s);
+		}
+		s.setDisplayName(trimmed);
+		sessionRepository.save(s);
+		sessionAuditService.append(sessionId, SessionAuditEventType.RENAME_SESSION, renameAuditDetail(previous, trimmed));
+		return toHeader(s);
 	}
 
 	@Transactional
@@ -392,10 +415,16 @@ public class ConciliacionSessionService {
 	}
 
 	private SessionHeaderDto toHeader(ReconciliationSession s) {
-		return new SessionHeaderDto(s.getId(), s.getCreatedAt(), s.getSourceBankFileName(),
+		return new SessionHeaderDto(s.getId(), s.getCreatedAt(), s.getDisplayName(), s.getSourceBankFileName(),
 				s.getSourceCompanyFileName(), s.getStatus().name(), s.getOpeningBankBalance(), s.getClosingBankBalance(),
 				s.getOpeningCompanyBalance(), s.getClosingCompanyBalance(), s.getAmountTolerance(),
 				s.getDateToleranceDays());
+	}
+
+	private static String renameAuditDetail(String previous, String next) {
+		String from = previous == null || previous.isBlank() ? "(sin nombre)" : previous.trim();
+		String to = next == null ? "(sin nombre)" : next.trim();
+		return from + " → " + to;
 	}
 
 	/**

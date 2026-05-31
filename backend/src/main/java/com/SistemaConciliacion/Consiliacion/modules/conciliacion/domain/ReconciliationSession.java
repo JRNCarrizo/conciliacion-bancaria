@@ -30,6 +30,10 @@ public class ReconciliationSession {
 	@Column(name = "source_company_file_name")
 	private String sourceCompanyFileName;
 
+	/** Nombre legible opcional (ej. «Octubre 2025»). */
+	@Column(name = "display_name", length = 120)
+	private String displayName;
+
 	@Enumerated(EnumType.STRING)
 	@Column(nullable = false, length = 32)
 	private SessionStatus status = SessionStatus.IMPORTED;
@@ -90,6 +94,14 @@ public class ReconciliationSession {
 
 	public void setSourceCompanyFileName(String sourceCompanyFileName) {
 		this.sourceCompanyFileName = sourceCompanyFileName;
+	}
+
+	public String getDisplayName() {
+		return displayName;
+	}
+
+	public void setDisplayName(String displayName) {
+		this.displayName = displayName;
 	}
 
 	public SessionStatus getStatus() {

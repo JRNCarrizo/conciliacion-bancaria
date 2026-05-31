@@ -80,6 +80,8 @@ public class SessionAuditService {
 			case REOPEN_SESSION -> "Reabrió la sesión";
 			case VIEW_DETAIL -> "Abrió el detalle de la sesión";
 			case UNLINK_PAIR -> "Desvinculó un par";
+			case SAVE_CHECKPOINT -> "Guardó corte de jornada";
+			case RENAME_SESSION -> "Renombró la sesión";
 		};
 	}
 }

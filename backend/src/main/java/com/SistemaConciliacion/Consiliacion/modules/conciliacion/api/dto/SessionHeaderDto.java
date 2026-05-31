@@ -5,8 +5,8 @@ import java.time.Instant;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 
-public record SessionHeaderDto(long id, Instant createdAt, String sourceBankFileName, String sourceCompanyFileName,
-		String status, BigDecimal openingBankBalance, BigDecimal closingBankBalance,
+public record SessionHeaderDto(long id, Instant createdAt, String displayName, String sourceBankFileName,
+		String sourceCompanyFileName, String status, BigDecimal openingBankBalance, BigDecimal closingBankBalance,
 		BigDecimal openingCompanyBalance, BigDecimal closingCompanyBalance,
 		@JsonInclude(JsonInclude.Include.ALWAYS) BigDecimal amountTolerance,
 		@JsonInclude(JsonInclude.Include.ALWAYS) Integer dateToleranceDays) {

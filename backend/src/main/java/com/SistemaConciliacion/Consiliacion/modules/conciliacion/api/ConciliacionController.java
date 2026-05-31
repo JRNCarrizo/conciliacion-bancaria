@@ -42,6 +42,9 @@ import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.ManualP
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.MovementAttachmentDto;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.ReopenSessionRequestDto;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.SessionBalancesDto;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.CreateCheckpointRequestDto;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.SessionCheckpointDto;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.SessionDisplayNameDto;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.SessionDetailDto;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.SessionHeaderDto;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.SessionAuditEntryDto;
@@ -58,6 +61,7 @@ import com.SistemaConciliacion.Consiliacion.modules.conciliacion.excel.Plataform
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.PendingMovementSide;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.service.ConciliacionSessionService;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.service.SessionAuditService;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.service.SessionCheckpointService;
 
 @RestController
 @RequestMapping("/api/v1/conciliacion")
@@ -73,6 +77,7 @@ public class ConciliacionController {
 	private final MovementAttachmentService movementAttachmentService;
 	private final PairAttachmentService pairAttachmentService;
 	private final SessionAuditService sessionAuditService;
+	private final SessionCheckpointService sessionCheckpointService;
 
 	public ConciliacionController(ConciliacionImportService conciliacionImportService,
 			ConciliacionSessionService conciliacionSessionService,
@@ -81,7 +86,8 @@ public class ConciliacionController {
 			ConciliacionExportService conciliacionExportService,
 			MovementAttachmentService movementAttachmentService,
 			PairAttachmentService pairAttachmentService,
-			SessionAuditService sessionAuditService) {
+			SessionAuditService sessionAuditService,
+			SessionCheckpointService sessionCheckpointService) {
 		this.conciliacionImportService = conciliacionImportService;
 		this.conciliacionSessionService = conciliacionSessionService;
 		this.conciliacionMatchingService = conciliacionMatchingService;
@@ -90,6 +96,7 @@ public class ConciliacionController {
 		this.movementAttachmentService = movementAttachmentService;
 		this.pairAttachmentService = pairAttachmentService;
 		this.sessionAuditService = sessionAuditService;
+		this.sessionCheckpointService = sessionCheckpointService;
 	}
 
 	@GetMapping("/status")
@@ -131,9 +138,47 @@ public class ConciliacionController {
 		return sessionAuditService.listForSession(id);
 	}
 
+	@GetMapping("/sessions/{id}/cortes")
+	public List<SessionCheckpointDto> listCheckpoints(@PathVariable long id) {
+		return sessionCheckpointService.listForSession(id);
+	}
+
+	@GetMapping("/sessions/{id}/cortes/{corteId}")
+	public SessionCheckpointDto getCheckpoint(@PathVariable long id, @PathVariable long corteId) {
+		return sessionCheckpointService.get(id, corteId);
+	}
+
+	@GetMapping("/sessions/{id}/cortes/{corteId}/pdf")
+	public ResponseEntity<Resource> downloadCheckpointPdf(@PathVariable long id, @PathVariable long corteId) {
+		Resource resource = sessionCheckpointService.loadPdf(id, corteId);
+		ContentDisposition disposition = ContentDisposition.inline()
+				.filename("conciliacion-sesion-" + id + "-corte-" + corteId + ".pdf", StandardCharsets.UTF_8)
+				.build();
+		return ResponseEntity.ok()
+				.header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
+				.contentType(MediaType.APPLICATION_PDF)
+				.body(resource);
+	}
+
+	@PreAuthorize("hasAnyRole('ADMIN', 'OPERADOR')")
+	@PostMapping(value = "/sessions/{id}/cortes", consumes = MediaType.APPLICATION_JSON_VALUE)
+	public SessionCheckpointDto createCheckpoint(@PathVariable long id,
+			@RequestBody(required = false) CreateCheckpointRequestDto body) {
+		String note = body != null ? body.note() : null;
+		return sessionCheckpointService.create(id, note);
+	}
+
 	@PutMapping(value = "/sessions/{id}/balances", consumes = MediaType.APPLICATION_JSON_VALUE)
 	public SessionHeaderDto putBalances(@PathVariable long id, @RequestBody SessionBalancesDto body) {
 		return conciliacionSessionService.putBalances(id, body);
+	}
+
+	@PreAuthorize("hasAnyRole('ADMIN', 'OPERADOR')")
+	@PutMapping(value = "/sessions/{id}/nombre", consumes = MediaType.APPLICATION_JSON_VALUE)
+	public SessionHeaderDto updateDisplayName(@PathVariable long id,
+			@RequestBody(required = false) SessionDisplayNameDto body) {
+		String name = body != null ? body.displayName() : null;
+		return conciliacionSessionService.updateDisplayName(id, name);
 	}
 
 	/** Cierra la sesión: bloquea saldos, clasificación de pendientes y cambios de conciliación estructural. */

@@ -30,6 +30,7 @@ import type {
 } from './types'
 import { apiFetch } from '../../api/client'
 import { useAuth } from '../../auth/AuthContext'
+import { registerLogoutCheckpointProvider } from '../../auth/logoutCheckpoint'
 import {
   downloadAuthenticatedFile,
   openAuthenticatedFileInNewTab,
@@ -67,6 +68,9 @@ import {
   resolveFuzzyCounterpart,
   type CounterpartInspectRequest,
 } from './utils/counterpartUtils'
+import { SessionCheckpointsSection } from './SessionCheckpointsSection'
+import { SessionDisplayNameEditor, SessionHistoryList } from './SessionHistoryList'
+import { SessionSourceFiles } from './SessionSourceFiles'
 import { ShareInChatButton } from './ShareInChatButton'
 import { UnlinkPairButton } from './UnlinkPairButton'
 import {
@@ -2003,7 +2007,7 @@ function SessionActivityModal({
           </button>
         </header>
         <p className="session-activity-hint">
-          Importación, apertura del detalle, conciliación, saldos, cierre y reapertura (admin) — quién y cuándo.
+          Importación, apertura del detalle, conciliación, cortes de jornada, saldos, cierre y reapertura (admin) — quién y cuándo.
         </p>
         {loading && (
           <div className="session-activity-state session-activity-state--loading" aria-busy="true">
@@ -2787,6 +2791,24 @@ export default function ConciliacionPage() {
   const reconcileLocked =
     detailLoading || (detailMatchesSelection && detail.session.status === 'CLOSED')
 
+  const logoutCheckpointRef = useRef<{ sessionId: number | null; canSave: boolean }>({
+    sessionId: null,
+    canSave: false,
+  })
+  logoutCheckpointRef.current = {
+    sessionId:
+      detailMatchesSelection && !sessionClosed && selectedId != null ? selectedId : null,
+    canSave: !sessionClosed && user?.role !== 'CONSULTA',
+  }
+
+  useEffect(() => {
+    return registerLogoutCheckpointProvider(() => {
+      const { sessionId, canSave } = logoutCheckpointRef.current
+      if (sessionId == null || !canSave) return null
+      return { sessionId }
+    })
+  }, [])
+
   const counterpartModalPayload = useMemo(() => {
     if (!counterpartInspect || !detail) return null
     const { mode, side, mov } = counterpartInspect
@@ -3269,6 +3291,22 @@ export default function ConciliacionPage() {
     }
   }
 
+  function handleSessionRenamed(sessionId: number, displayName: string | null) {
+    setSessions((prev) => prev.map((s) => (s.id === sessionId ? { ...s, displayName } : s)))
+    setDetail((prev) =>
+      prev && prev.session.id === sessionId
+        ? { ...prev, session: { ...prev.session, displayName } }
+        : prev,
+    )
+  }
+
+  function openSessionFromList(sessionId: number) {
+    setSelectedId(sessionId)
+    window.requestAnimationFrame(() => {
+      document.getElementById('detalle-conciliacion')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
+  }
+
   async function handleSetPairClassification(pairId: number, classification: string) {
     if (selectedId == null) return
     const y = window.scrollY
@@ -3306,9 +3344,9 @@ export default function ConciliacionPage() {
             <div className="history-card-head-text">
               <h2 className="history-card-title">Sesiones de conciliación</h2>
               <p className="hint history-hint">
-                Listado de las importaciones guardadas.                 Elegí <strong>Abrir</strong> para el detalle
-                (comparativa, vistas y cierre), <strong>Actividad</strong> para ver quién hizo qué y{' '}
-                <strong>Excel</strong> o <strong>PDF</strong> para exportar.
+                Cada importación es una sesión con <strong>nombre editable</strong> (botón «Editar nombre» en el
+                detalle). Elegí <strong>Abrir</strong> para conciliar, <strong>Actividad</strong> para auditoría, o
+                exportá en Excel/PDF.
               </p>
             </div>
             <div className="history-card-actions">
@@ -3337,103 +3375,15 @@ export default function ConciliacionPage() {
             <p className="msg">No hay sesiones importadas todavía.</p>
           )}
           {sessions.length > 0 && (
-            <div className="table-wrap history-table-wrap">
-              <table className="data-table history-table">
-                <thead>
-                  <tr>
-                    <th>Fecha</th>
-                    <th>ID</th>
-                    <th>Archivo banco</th>
-                    <th>Archivo plataforma</th>
-                    <th className="cell-num">Filas B/E</th>
-                    <th className="cell-num">Pares</th>
-                    <th>Estado</th>
-                    <th className="history-th-actions">Acciones</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {sessions.map((s) => (
-                    <tr
-                      key={s.id}
-                      className={[
-                        'history-row',
-                        selectedId === s.id ? 'history-row--active' : '',
-                        s.status === 'CLOSED' ? 'history-row--closed' : '',
-                      ]
-                        .filter(Boolean)
-                        .join(' ')}
-                    >
-                      <td className="cell-nowrap">{formatSessionListWhen(s.createdAt)}</td>
-                      <td className="cell-mono">{s.id}</td>
-                      <td className="history-file" title={s.sourceBankFileName ?? undefined}>
-                        {s.sourceBankFileName != null && String(s.sourceBankFileName).trim() !== ''
-                          ? s.sourceBankFileName
-                          : '—'}
-                      </td>
-                      <td className="history-file" title={s.sourceCompanyFileName ?? undefined}>
-                        {s.sourceCompanyFileName != null && String(s.sourceCompanyFileName).trim() !== ''
-                          ? s.sourceCompanyFileName
-                          : '—'}
-                      </td>
-                      <td className="cell-num">
-                        {s.bankRowCount} / {s.companyRowCount}
-                      </td>
-                      <td className="cell-num">{s.matchedPairs}</td>
-                      <td>
-                        <span
-                          className={`session-status-pill session-status-pill--${s.status.toLowerCase()} history-session-status-pill`}
-                        >
-                          {sessionStatusLabel(s.status)}
-                        </span>
-                      </td>
-                      <td>
-                        <div className="history-actions">
-                          <button
-                            type="button"
-                            className="btn-link history-open-btn"
-                            onClick={() => {
-                              setSelectedId(s.id)
-                              window.requestAnimationFrame(() => {
-                                document
-                                  .getElementById('detalle-conciliacion')
-                                  ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-                              })
-                            }}
-                          >
-                            Abrir
-                          </button>
-                          <button
-                            type="button"
-                            className="btn-link history-audit-btn"
-                            title="Ver actividad de la sesión"
-                            onClick={() => void openSessionActivity(s.id)}
-                          >
-                            Actividad
-                          </button>
-                          <button
-                            type="button"
-                            className="export-link history-excel-link"
-                            disabled={exportLoading}
-                            onClick={() => void downloadSessionExcel(s.id)}
-                          >
-                            Excel
-                          </button>
-                          <button
-                            type="button"
-                            className="export-link history-pdf-link"
-                            title="Informe en PDF: resumen, conciliados y pendientes"
-                            disabled={exportLoading}
-                            onClick={() => void downloadSessionPdf(s.id)}
-                          >
-                            PDF
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <SessionHistoryList
+              sessions={sessions}
+              selectedId={selectedId}
+              exportLoading={exportLoading}
+              onOpen={openSessionFromList}
+              onActivity={(id) => void openSessionActivity(id)}
+              onExportExcel={(id) => void downloadSessionExcel(id)}
+              onExportPdf={(id) => void downloadSessionPdf(id)}
+            />
           )}
           {sessionListTotalPages > 1 && (
             <div className="history-pagination">
@@ -3920,7 +3870,19 @@ export default function ConciliacionPage() {
           {selectedId != null && (
             <div className="session-detail-shell">
               <div className="session-detail-head">
-                <h3 className="session-detail-title">Sesión {selectedId}</h3>
+                {detailMatchesSelection && !detailLoading ? (
+                  <SessionDisplayNameEditor
+                    sessionId={selectedId}
+                    createdAt={detail.session.createdAt}
+                    displayName={detail.session.displayName}
+                    readOnly={user?.role === 'CONSULTA'}
+                    onSaved={(displayName) => handleSessionRenamed(selectedId, displayName)}
+                  />
+                ) : selectedId != null ? (
+                  <div className="session-display-name-view">
+                    <h3 className="session-detail-title">Sesión #{selectedId}</h3>
+                  </div>
+                ) : null}
                 <div className="session-detail-head-actions">
                   <button
                     type="button"
@@ -3981,6 +3943,10 @@ export default function ConciliacionPage() {
                 <div className="msg subtle session-consulta-hint" role="status">
                   Perfil solo consulta: la clasificación de movimientos y pares es de solo lectura.
                 </div>
+              )}
+
+              {detailMatchesSelection && !detailLoading && selectedId != null && (
+                <SessionCheckpointsSection sessionId={selectedId} />
               )}
 
               <div className="session-detail-run">
@@ -4075,26 +4041,11 @@ export default function ConciliacionPage() {
                       {sessionStatusLabel(detail.session.status)}
                     </span>
                   </div>
-                  <div className="session-detail-files">
-                    <div className="session-detail-file">
-                      <span className="session-detail-meta-k">Archivo banco</span>
-                      <span
-                        className="session-detail-file-name"
-                        title={detail.session.sourceBankFileName ?? undefined}
-                      >
-                        {detail.session.sourceBankFileName ?? '—'}
-                      </span>
-                    </div>
-                    <div className="session-detail-file">
-                      <span className="session-detail-meta-k">Archivo empresa</span>
-                      <span
-                        className="session-detail-file-name"
-                        title={detail.session.sourceCompanyFileName ?? undefined}
-                      >
-                        {detail.session.sourceCompanyFileName ?? '—'}
-                      </span>
-                    </div>
-                  </div>
+                  <SessionSourceFiles
+                    bankFileName={detail.session.sourceBankFileName}
+                    companyFileName={detail.session.sourceCompanyFileName}
+                    variant="detail"
+                  />
                 </div>
               )}
 

@@ -28,7 +28,7 @@ type AuthContextValue = {
   user: AuthUser | null
   isAuthenticated: boolean
   setSession: (token: string, user: AuthUser) => void
-  logout: () => void
+  logout: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
@@ -58,7 +58,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(u)
   }, [])
 
-  const logout = useCallback(() => {
+  const logout = useCallback(async () => {
     setStoredToken(null)
     localStorage.removeItem(AUTH_USER_KEY)
     setUser(null)

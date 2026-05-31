@@ -1,5 +1,8 @@
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
+import { getLogoutCheckpointContext } from '../auth/logoutCheckpoint'
+import { LogoutCheckpointModal, saveLogoutCheckpoint } from '../features/conciliacion/LogoutCheckpointModal'
 import { ChatNavbarTrigger } from '../features/chat/ChatNavbarTrigger'
 import { BrandLogo } from './BrandLogo'
 import { ThemeToggle } from './ThemeToggle'
@@ -13,6 +16,47 @@ const ROLE_LABEL: Record<string, string> = {
 
 export function AppNavbar() {
   const { user, isAuthenticated, logout } = useAuth()
+  const [loggingOut, setLoggingOut] = useState(false)
+  const [logoutPromptOpen, setLogoutPromptOpen] = useState(false)
+  const [logoutSessionId, setLogoutSessionId] = useState<number | null>(null)
+  const [logoutError, setLogoutError] = useState<string | null>(null)
+
+  async function finishLogout() {
+    setLoggingOut(true)
+    try {
+      await logout()
+    } finally {
+      setLoggingOut(false)
+      setLogoutPromptOpen(false)
+      setLogoutSessionId(null)
+      setLogoutError(null)
+    }
+  }
+
+  function handleLogoutClick() {
+    if (loggingOut) return
+    const ctx = getLogoutCheckpointContext()
+    if (ctx) {
+      setLogoutSessionId(ctx.sessionId)
+      setLogoutError(null)
+      setLogoutPromptOpen(true)
+      return
+    }
+    void finishLogout()
+  }
+
+  async function handleLogoutWithCheckpoint(note: string) {
+    if (logoutSessionId == null) return
+    setLoggingOut(true)
+    setLogoutError(null)
+    try {
+      await saveLogoutCheckpoint(logoutSessionId, note)
+      await finishLogout()
+    } catch (e) {
+      setLogoutError(e instanceof Error ? e.message : String(e))
+      setLoggingOut(false)
+    }
+  }
 
   return (
     <header className="app-navbar">
@@ -34,8 +78,13 @@ export function AppNavbar() {
                   <span className="app-navbar-user-name">{user.username}</span>
                   <span className="app-navbar-user-role">{ROLE_LABEL[user.role] ?? user.role}</span>
                 </span>
-                <button type="button" className="btn-secondary app-navbar-logout" onClick={() => logout()}>
-                  Salir
+                <button
+                  type="button"
+                  className="btn-secondary app-navbar-logout"
+                  disabled={loggingOut}
+                  onClick={handleLogoutClick}
+                >
+                  {loggingOut ? 'Saliendo…' : 'Salir'}
                 </button>
               </div>
             </>
@@ -48,6 +97,21 @@ export function AppNavbar() {
           )}
         </div>
       </div>
+
+      {logoutPromptOpen && logoutSessionId != null ? (
+        <LogoutCheckpointModal
+          sessionId={logoutSessionId}
+          saving={loggingOut}
+          error={logoutError}
+          onCancel={() => {
+            if (loggingOut) return
+            setLogoutPromptOpen(false)
+            setLogoutSessionId(null)
+            setLogoutError(null)
+          }}
+          onConfirm={(note) => void handleLogoutWithCheckpoint(note)}
+        />
+      ) : null}
     </header>
   )
 }

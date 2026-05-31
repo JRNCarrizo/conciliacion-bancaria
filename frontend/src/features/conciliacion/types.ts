@@ -63,6 +63,7 @@ export type ImportResult = {
 export type SessionSummary = {
   id: number
   createdAt: string
+  displayName: string | null
   sourceBankFileName: string | null
   sourceCompanyFileName: string | null
   status: string
@@ -79,6 +80,21 @@ export type SessionAuditEntry = {
   username: string
   createdAt: string
   detail: string | null
+}
+
+/** Corte de jornada: PDF + KPIs congelados; la sesión sigue abierta. */
+export type SessionCheckpoint = {
+  id: number
+  sessionId: number
+  createdAt: string
+  createdByUsername: string
+  note: string | null
+  sessionStatusAtSave: string
+  matchedPairs: number
+  unmatchedBankCount: number
+  unmatchedCompanyCount: number
+  reconciliationStatus: string
+  stats: ConciliacionStatsDto
 }
 
 export type PageSessions = {
@@ -205,6 +221,7 @@ export type SessionDetail = {
   session: {
     id: number
     createdAt: string
+    displayName: string | null
     sourceBankFileName: string | null
     sourceCompanyFileName: string | null
     status: string
