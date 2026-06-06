@@ -3355,14 +3355,6 @@ export default function ConciliacionPage() {
                   ? '1 sesión'
                   : `${sessionListTotalElements} sesiones`}
               </span>
-              <button
-                type="button"
-                className="btn-secondary history-refresh-btn"
-                title="Volver a cargar el listado desde el servidor"
-                onClick={() => void loadSessionListPage(sessionListPage)}
-              >
-                Actualizar listado
-              </button>
             </div>
           </div>
           {sessionsError && <p className="msg err">{sessionsError}</p>}

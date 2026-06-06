@@ -590,10 +590,6 @@ html[data-theme='dark'] .import-form-files .import-file-input::-webkit-file-uplo
   padding-top: 0.1rem;
 }
 
-.history-refresh-btn {
-  white-space: nowrap;
-}
-
 .history-toolbar-meta {
   font-size: 0.82rem;
   font-weight: 500;
