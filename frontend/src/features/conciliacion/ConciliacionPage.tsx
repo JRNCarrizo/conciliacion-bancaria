@@ -37,7 +37,7 @@ import {
   useAuthenticatedBlobUrl,
 } from './api/authenticatedBlob'
 import { parseError } from './api/http'
-import { rowMatchesClassification, rowMatchesSearch } from './utils/compareSearch'
+import { rowMatchesClassification, rowMatchesSearch, searchMatchPriority } from './utils/compareSearch'
 import {
   coerceAmount,
   effectivePairKindFromAmounts,
@@ -2718,20 +2718,37 @@ export default function ConciliacionPage() {
     ],
   )
 
-  const filteredComparisonRows = useMemo(
-    () =>
-      rowsAfterLegendAndDate.filter(
-        (r) =>
-          rowMatchesSearch(r, compareSearchQuery) &&
-          rowMatchesClassification(r, compareClassificationFilter),
-      ),
-    [rowsAfterLegendAndDate, compareSearchQuery, compareClassificationFilter],
-  )
+  const filteredComparisonRows = useMemo(() => {
+    const filtered = rowsAfterLegendAndDate.filter(
+      (r) =>
+        rowMatchesSearch(r, compareSearchQuery) &&
+        rowMatchesClassification(r, compareClassificationFilter),
+    )
+    const q = compareSearchQuery.trim()
+    if (q === '') return filtered
+    return [...filtered].sort((a, b) => {
+      const pa = searchMatchPriority(a, q) ?? 99
+      const pb = searchMatchPriority(b, q) ?? 99
+      return pa - pb
+    })
+  }, [rowsAfterLegendAndDate, compareSearchQuery, compareClassificationFilter])
 
-  const filteredChronologicalRows = useMemo(
-    () => sortRowsChronologically(filteredComparisonRows),
-    [filteredComparisonRows],
-  )
+  const filteredChronologicalRows = useMemo(() => {
+    const q = compareSearchQuery.trim()
+    if (q === '') return sortRowsChronologically(filteredComparisonRows)
+    return [...filteredComparisonRows].sort((a, b) => {
+      const pa = searchMatchPriority(a, q) ?? 99
+      const pb = searchMatchPriority(b, q) ?? 99
+      if (pa !== pb) return pa - pb
+      const da = rowTimelineSortDate(a)
+      const db = rowTimelineSortDate(b)
+      const byDate = da.localeCompare(db)
+      if (byDate !== 0) return byDate
+      const ko = timelineKindOrder(a) - timelineKindOrder(b)
+      if (ko !== 0) return ko
+      return a.key.localeCompare(b.key)
+    })
+  }, [filteredComparisonRows, compareSearchQuery])
 
   /** Misma lógica que Comparativa/Completa: estado + rango de fechas → tablas clásicas. */
   const classicFilteredPairRows = useMemo(

@@ -73,6 +73,63 @@ function textHaystackForRow(row: ComparisonRow): string {
   return parts.filter((p) => p != null && String(p).trim() !== '').join(' \u2003 ')
 }
 
+function rowMatchesId(row: ComparisonRow, idNum: number): boolean {
+  if (row.kind === 'pair') {
+    const { pair, bank, company } = row
+    return (
+      pair.pairId === idNum ||
+      pair.bankTxId === idNum ||
+      pair.companyTxId === idNum ||
+      bank.id === idNum ||
+      company.id === idNum
+    )
+  }
+  return row.m.id === idNum
+}
+
+function rowMatchesAmount(row: ComparisonRow, amount: number): boolean {
+  return amountValuesForRow(row).some((n) => amountsClose(n, amount))
+}
+
+function rowMatchesText(row: ComparisonRow, needle: string): boolean {
+  if (needle.length === 0) return false
+  return fold(textHaystackForRow(row)).includes(needle)
+}
+
+/** Menor valor = mayor prioridad al ordenar resultados de búsqueda. */
+export const SEARCH_MATCH_ID = 0
+export const SEARCH_MATCH_AMOUNT = 1
+export const SEARCH_MATCH_TEXT = 2
+
+/**
+ * Prioridad de coincidencia: ID exacto → importe → texto (ref/desc).
+ * null si la fila no coincide con la consulta.
+ */
+export function searchMatchPriority(row: ComparisonRow, rawQuery: string): number | null {
+  const q = rawQuery.trim()
+  if (q === '') return null
+
+  let best: number | null = null
+
+  const idNum = parseTransactionId(q)
+  if (idNum != null && rowMatchesId(row, idNum)) {
+    best = SEARCH_MATCH_ID
+  }
+
+  const parsedAmount = parseBalanceInput(q)
+  if (parsedAmount != null && rowMatchesAmount(row, parsedAmount)) {
+    best = best === null ? SEARCH_MATCH_AMOUNT : Math.min(best, SEARCH_MATCH_AMOUNT)
+  }
+
+  const needle = fold(q)
+  if (rowMatchesText(row, needle)) {
+    const textRank = SEARCH_MATCH_TEXT
+    best = best === null ? textRank : Math.min(best, textRank)
+  }
+
+  return best
+}
+
 /**
  * Coincide con ID exacto (movimiento o par), importe (misma lógica que saldos) o texto en ref/desc/importe formateado.
  * Vacío = no filtra.
@@ -94,33 +151,5 @@ export function rowMatchesClassification(row: ComparisonRow, raw: string): boole
 export function rowMatchesSearch(row: ComparisonRow, rawQuery: string): boolean {
   const q = rawQuery.trim()
   if (q === '') return true
-
-  const idNum = parseTransactionId(q)
-  if (idNum != null) {
-    if (row.kind === 'pair') {
-      const { pair, bank, company } = row
-      if (
-        pair.pairId === idNum ||
-        pair.bankTxId === idNum ||
-        pair.companyTxId === idNum ||
-        bank.id === idNum ||
-        company.id === idNum
-      ) {
-        return true
-      }
-    } else if (row.m.id === idNum) {
-      return true
-    }
-  }
-
-  const parsedAmount = parseBalanceInput(q)
-  if (parsedAmount != null) {
-    if (amountValuesForRow(row).some((n) => amountsClose(n, parsedAmount))) {
-      return true
-    }
-  }
-
-  const needle = fold(q)
-  if (needle.length === 0) return true
-  return fold(textHaystackForRow(row)).includes(needle)
+  return searchMatchPriority(row, rawQuery) != null
 }
