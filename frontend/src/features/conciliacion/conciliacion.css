@@ -2138,11 +2138,26 @@ html[data-theme='dark'] .exec-num--warn {
   }
 }
 
+.detail-view-toggle-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem 0.85rem;
+  margin: 1rem 0 0.5rem;
+}
+
+.detail-view-toggle-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-h);
+  flex-shrink: 0;
+}
+
 .detail-view-toggle {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
-  margin: 1rem 0 0.5rem;
+  margin: 0;
 }
 
 .detail-view-toggle .session-pill {
@@ -2242,6 +2257,92 @@ html[data-theme='dark'] .exec-num--warn {
 .compare-filters-bar--above-table {
   margin-top: 0.65rem;
   margin-bottom: 0.75rem;
+}
+
+.compare-filters-bar--with-help {
+  overflow: visible;
+}
+
+.subsection-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 0.65rem;
+  margin: 0.75rem 0 0.35rem;
+}
+
+.subsection-title-row .subsection-title {
+  margin: 0;
+}
+
+.view-help-popover {
+  position: relative;
+  flex: 0 0 auto;
+  align-self: center;
+}
+
+.view-help-popover-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg) 88%, var(--social-bg));
+  color: var(--text-h);
+  cursor: pointer;
+  font: inherit;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.view-help-popover-toggle:hover,
+.view-help-popover-toggle--open {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--bg) 82%, var(--accent));
+}
+
+.view-help-popover-icon {
+  width: 1.15rem;
+  height: 1.15rem;
+  flex-shrink: 0;
+}
+
+.view-help-popover-panel {
+  position: absolute;
+  top: calc(100% + 0.45rem);
+  left: 0;
+  z-index: 50;
+  width: min(28rem, calc(100vw - 2.5rem));
+  margin: 0;
+  padding: 0.75rem 0.85rem;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  box-shadow:
+    0 10px 28px color-mix(in srgb, #000 22%, transparent),
+    0 2px 8px color-mix(in srgb, #000 12%, transparent);
+  font-size: 0.84rem;
+  line-height: 1.5;
+}
+
+.view-help-popover-panel::before {
+  content: '';
+  position: absolute;
+  top: -5px;
+  left: 0.7rem;
+  width: 9px;
+  height: 9px;
+  background: var(--bg);
+  border-left: 1px solid var(--border);
+  border-top: 1px solid var(--border);
+  transform: rotate(45deg);
+}
+
+.compare-filters-bar--with-help .view-help-popover {
+  align-self: flex-end;
 }
 
 .compare-date-toolbar-label {
@@ -4379,7 +4480,53 @@ button.compare-badge.compare-hint-btn:hover {
 }
 
 .rubro-summary-row--open {
-  background: rgba(37, 99, 235, 0.06);
+  background: color-mix(in srgb, var(--accent, #2563eb) 14%, var(--bg));
+  box-shadow: inset 4px 0 0 color-mix(in srgb, var(--accent, #2563eb) 75%, transparent);
+}
+
+.rubro-summary-row--picked-bank {
+  background: color-mix(in srgb, var(--compare-pend-bank) 48%, var(--bg));
+  box-shadow:
+    inset 5px 0 0 var(--compare-pend-bank),
+    0 0 0 1px color-mix(in srgb, var(--compare-pend-bank) 55%, var(--border));
+}
+
+.rubro-summary-row--picked-company {
+  background: color-mix(in srgb, var(--compare-pend-company) 48%, var(--bg));
+  box-shadow:
+    inset 5px 0 0 var(--compare-pend-company),
+    0 0 0 1px color-mix(in srgb, var(--compare-pend-company) 55%, var(--border));
+}
+
+.rubro-summary-row--picked-bank.rubro-summary-row--picked-company {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--compare-pend-bank) 42%, var(--bg)) 0%,
+    color-mix(in srgb, var(--compare-pend-bank) 42%, var(--bg)) 50%,
+    color-mix(in srgb, var(--compare-pend-company) 42%, var(--bg)) 50%,
+    color-mix(in srgb, var(--compare-pend-company) 42%, var(--bg)) 100%
+  );
+  box-shadow:
+    inset 5px 0 0 var(--compare-pend-bank),
+    inset -5px 0 0 var(--compare-pend-company),
+    0 0 0 2px color-mix(in srgb, var(--accent, #2563eb) 35%, var(--border));
+}
+
+.rubro-summary-row--picked-bank .rubro-name-cell strong,
+.rubro-summary-row--picked-company .rubro-name-cell strong {
+  color: var(--text-h);
+}
+
+.rubro-summary-row--open.rubro-summary-row--picked-bank:not(.rubro-summary-row--picked-company) {
+  box-shadow:
+    inset 5px 0 0 var(--compare-pend-bank),
+    0 0 0 2px color-mix(in srgb, var(--compare-pend-bank) 50%, transparent);
+}
+
+.rubro-summary-row--open.rubro-summary-row--picked-company:not(.rubro-summary-row--picked-bank) {
+  box-shadow:
+    inset 5px 0 0 var(--compare-pend-company),
+    0 0 0 2px color-mix(in srgb, var(--compare-pend-company) 50%, transparent);
 }
 
 .rubro-name-cell strong {
@@ -4550,9 +4697,12 @@ html[data-theme='dark'] .rubro-detail-pair-btn {
 
 .rubro-detail-pending-btn--active {
   color: var(--text-h);
-  background: color-mix(in srgb, var(--accent, #2563eb) 28%, var(--bg));
+  font-weight: 700;
+  background: color-mix(in srgb, var(--accent, #2563eb) 38%, var(--bg));
   border-color: var(--accent, #2563eb);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent, #2563eb) 35%, transparent);
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--accent, #2563eb) 42%, transparent),
+    0 2px 6px rgba(15, 23, 42, 0.12);
 }
 
 .rubro-detail-link-hint {
@@ -4562,9 +4712,18 @@ html[data-theme='dark'] .rubro-detail-pair-btn {
 }
 
 .rubro-detail-table tbody tr.rubro-detail-row--selected {
-  background: color-mix(in srgb, var(--accent, #2563eb) 18%, transparent);
-  outline: 1px solid color-mix(in srgb, var(--accent, #2563eb) 45%, transparent);
-  outline-offset: -1px;
+  background: color-mix(in srgb, var(--accent, #2563eb) 32%, var(--bg));
+  box-shadow: inset 4px 0 0 var(--accent, #2563eb);
+}
+
+.rubro-detail-table tbody tr.rubro-detail-row--selected td {
+  border-top-color: color-mix(in srgb, var(--accent, #2563eb) 35%, var(--border));
+  border-bottom-color: color-mix(in srgb, var(--accent, #2563eb) 35%, var(--border));
+  font-weight: 500;
+}
+
+.rubro-detail-table tbody tr.rubro-detail-row--selected td:first-child {
+  font-weight: 700;
 }
 
 .rubro-cross-link-bar {
@@ -4768,13 +4927,19 @@ html[data-theme='dark'] .rubro-detail-pair-btn {
 }
 
 .rubro-cross-pick-field--bank .rubro-cross-pick-select--filled {
-  border-left: 3px solid color-mix(in srgb, var(--compare-pend-bank) 85%, var(--border));
-  font-weight: 500;
+  border-color: color-mix(in srgb, var(--compare-pend-bank) 70%, var(--border));
+  border-left: 4px solid var(--compare-pend-bank);
+  background: color-mix(in srgb, var(--compare-pend-bank) 38%, var(--bg));
+  font-weight: 600;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--compare-pend-bank) 35%, transparent);
 }
 
 .rubro-cross-pick-field--company .rubro-cross-pick-select--filled {
-  border-left: 3px solid color-mix(in srgb, var(--compare-pend-company) 85%, var(--border));
-  font-weight: 500;
+  border-color: color-mix(in srgb, var(--compare-pend-company) 70%, var(--border));
+  border-left: 4px solid var(--compare-pend-company);
+  background: color-mix(in srgb, var(--compare-pend-company) 38%, var(--bg));
+  font-weight: 600;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--compare-pend-company) 35%, transparent);
 }
 
 .rubro-cross-pick-vs {
@@ -4944,24 +5109,23 @@ html[data-theme='light'] .rubro-cross-pick-select:focus {
 }
 
 .rubro-pick-btn--bank.rubro-pick-btn--active {
+  color: var(--text-h);
   background: var(--compare-pend-bank);
-  border-color: color-mix(in srgb, var(--text-h) 22%, var(--border));
+  border-color: color-mix(in srgb, var(--text-h) 32%, var(--border));
   box-shadow:
-    0 0 0 2px color-mix(in srgb, var(--compare-pend-bank) 65%, transparent),
-    0 2px 6px rgba(15, 23, 42, 0.1);
+    0 0 0 3px color-mix(in srgb, var(--compare-pend-bank) 72%, transparent),
+    0 2px 8px rgba(15, 23, 42, 0.14);
+  transform: scale(1.04);
 }
 
 .rubro-pick-btn--company.rubro-pick-btn--active {
+  color: var(--text-h);
   background: var(--compare-pend-company);
-  border-color: color-mix(in srgb, var(--text-h) 22%, var(--border));
+  border-color: color-mix(in srgb, var(--text-h) 32%, var(--border));
   box-shadow:
-    0 0 0 2px color-mix(in srgb, var(--compare-pend-company) 65%, transparent),
-    0 2px 6px rgba(15, 23, 42, 0.1);
-}
-
-.rubro-summary-row--picked {
-  outline: 1px solid rgba(37, 99, 235, 0.45);
-  outline-offset: -1px;
+    0 0 0 3px color-mix(in srgb, var(--compare-pend-company) 72%, transparent),
+    0 2px 8px rgba(15, 23, 42, 0.14);
+  transform: scale(1.04);
 }
 
 html[data-theme='light'] .rubro-pick-btn {
@@ -4971,8 +5135,79 @@ html[data-theme='light'] .rubro-pick-btn {
 html[data-theme='light'] .rubro-pick-btn--bank.rubro-pick-btn--active,
 html[data-theme='light'] .rubro-pick-btn--company.rubro-pick-btn--active {
   box-shadow:
-    0 0 0 2px rgba(37, 99, 235, 0.15),
-    0 2px 5px rgba(15, 23, 42, 0.08);
+    0 0 0 3px color-mix(in srgb, var(--accent, #2563eb) 22%, transparent),
+    0 2px 8px rgba(15, 23, 42, 0.12);
+}
+
+/* Modo claro: las celdas tienen fondo blanco fijo — pintar la fila entera en cada td */
+html[data-theme='light'] .app .data-table.rubro-summary-table tbody tr.rubro-summary-row--picked-bank {
+  outline: 2px solid #ea580c;
+  outline-offset: -2px;
+}
+
+html[data-theme='light'] .app .data-table.rubro-summary-table tbody tr.rubro-summary-row--picked-bank td {
+  background: #ffedd5;
+  border-top-color: #fdba74;
+  border-bottom-color: #fdba74;
+}
+
+html[data-theme='light'] .app .data-table.rubro-summary-table tbody tr.rubro-summary-row--picked-bank td:first-child {
+  box-shadow: inset 6px 0 0 #ea580c;
+}
+
+html[data-theme='light'] .app .data-table.rubro-summary-table tbody tr.rubro-summary-row--picked-company {
+  outline: 2px solid #db2777;
+  outline-offset: -2px;
+}
+
+html[data-theme='light'] .app .data-table.rubro-summary-table tbody tr.rubro-summary-row--picked-company td {
+  background: #fce7f3;
+  border-top-color: #f9a8d4;
+  border-bottom-color: #f9a8d4;
+}
+
+html[data-theme='light'] .app .data-table.rubro-summary-table tbody tr.rubro-summary-row--picked-company td:first-child {
+  box-shadow: inset 6px 0 0 #db2777;
+}
+
+html[data-theme='light']
+  .app
+  .data-table.rubro-summary-table
+  tbody
+  tr.rubro-summary-row--picked-bank.rubro-summary-row--picked-company {
+  outline: 2px solid #c026d3;
+}
+
+html[data-theme='light']
+  .app
+  .data-table.rubro-summary-table
+  tbody
+  tr.rubro-summary-row--picked-bank.rubro-summary-row--picked-company
+  td {
+  background: linear-gradient(90deg, #ffedd5 0%, #ffedd5 50%, #fce7f3 50%, #fce7f3 100%);
+  border-top-color: #f0abfc;
+  border-bottom-color: #f0abfc;
+}
+
+html[data-theme='light']
+  .app
+  .data-table.rubro-summary-table
+  tbody
+  tr.rubro-summary-row--picked-bank
+  .rubro-name-cell
+  strong,
+html[data-theme='light']
+  .app
+  .data-table.rubro-summary-table
+  tbody
+  tr.rubro-summary-row--picked-company
+  .rubro-name-cell
+  strong {
+  font-weight: 700;
+}
+
+html[data-theme='light'] .rubro-detail-table tbody tr.rubro-detail-row--selected {
+  background: color-mix(in srgb, var(--accent, #2563eb) 22%, #fff);
 }
 
 .session-checkpoints {

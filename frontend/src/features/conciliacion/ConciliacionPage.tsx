@@ -164,6 +164,59 @@ function InfoCircleIcon({ className }: { className?: string }) {
   )
 }
 
+function CompareViewHelpText({
+  effectiveSessionAmountTolerance,
+}: {
+  effectiveSessionAmountTolerance: number | undefined
+}) {
+  return (
+    <>
+      Tocá un color (o «Todos») para ver solo filas de ese estado; en la barra de abajo, buscá por ID,
+      referencia, descripción o importe (mitad izquierda), filtrá por clasificación si querés (mitad
+      derecha) y acotá por fechas (extremo derecho). La grilla se ordena: pares, pendientes banco,
+      pendientes empresa.
+      {effectiveSessionAmountTolerance !== undefined ? (
+        <>
+          {' '}
+          «Δ importe» solo si la brecha supera la tolerancia de la última conciliación (±
+          {formatToleranceInputDisplay(Number(effectiveSessionAmountTolerance))}).
+        </>
+      ) : (
+        <> «Δ importe» usa umbral 0,02 hasta que concilies con tolerancia propia.</>
+      )}
+    </>
+  )
+}
+
+function CompleteViewHelpText() {
+  return (
+    <>
+      Todas las filas en una sola tabla, ordenadas por fecha. En cada par se usa la fecha más temprana
+      entre banco y empresa. Los pendientes muestran solo un lado; el otro queda vacío (—). Debajo de
+      la leyenda, la misma barra: búsqueda y filtro por clasificación, y fechas a la derecha.
+    </>
+  )
+}
+
+function ClassicViewHelpText() {
+  return (
+    <>
+      Mismos filtros que en Comparativa: tipo de fila, búsqueda (ID, ref., importe), clasificación y
+      fechas; las tres tablas muestran solo lo que cumple todos los criterios activos.
+    </>
+  )
+}
+
+function RubroViewHelpText() {
+  return (
+    <>
+      Compará sumas por concepto. Con <strong>Comparar cruzado</strong> elegís grupo banco y grupo
+      empresa; en el panel podés <strong>vincular</strong> dos movimientos pendientes (clic en la fila de
+      cada lado).
+    </>
+  )
+}
+
 function ExecutiveSummaryGuide() {
   return (
     <details className="exec-help-details">
@@ -655,6 +708,83 @@ function SessionBalancesForm({
   )
 }
 
+/** Icono ⓘ con burbuja de ayuda flotante (no desplaza el resto del layout). */
+function HelpPopoverButton({
+  children,
+  ariaLabel = 'Ayuda',
+  dialogLabel = 'Ayuda',
+}: {
+  children: React.ReactNode
+  ariaLabel?: string
+  dialogLabel?: string
+}) {
+  const [open, setOpen] = useState(false)
+  const rootRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    function onPointerDown(ev: MouseEvent) {
+      if (!rootRef.current?.contains(ev.target as Node)) {
+        setOpen(false)
+      }
+    }
+    function onKeyDown(ev: KeyboardEvent) {
+      if (ev.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', onPointerDown)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [open])
+
+  return (
+    <div className="view-help-popover" ref={rootRef}>
+      <button
+        type="button"
+        className={
+          open ? 'view-help-popover-toggle view-help-popover-toggle--open' : 'view-help-popover-toggle'
+        }
+        onClick={() => setOpen((v) => !v)}
+        aria-label={ariaLabel}
+        aria-expanded={open}
+        title="Ayuda"
+      >
+        <InfoCircleIcon className="view-help-popover-icon" />
+      </button>
+      {open && (
+        <div className="view-help-popover-panel hint" role="dialog" aria-label={dialogLabel}>
+          {children}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function SubsectionTitleRow({
+  children,
+  help,
+  helpAriaLabel,
+  helpDialogLabel,
+}: {
+  children: React.ReactNode
+  help?: React.ReactNode
+  helpAriaLabel?: string
+  helpDialogLabel?: string
+}) {
+  return (
+    <div className="subsection-title-row">
+      <h3 className="subsection-title">{children}</h3>
+      {help && (
+        <HelpPopoverButton ariaLabel={helpAriaLabel} dialogLabel={helpDialogLabel}>
+          {help}
+        </HelpPopoverButton>
+      )}
+    </div>
+  )
+}
+
 /** Búsqueda (izquierda) + rango de fechas (derecha) en un solo contenedor, encima de la tabla. */
 function CompareFiltersBar({
   searchValue,
@@ -668,6 +798,7 @@ function CompareFiltersBar({
   onDateFromChange,
   onDateToChange,
   onClearDates,
+  help,
 }: {
   searchValue: string
   onSearchChange: (v: string) => void
@@ -680,14 +811,20 @@ function CompareFiltersBar({
   onDateFromChange: (v: string) => void
   onDateToChange: (v: string) => void
   onClearDates: () => void
+  help?: React.ReactNode
 }) {
   const hasSearch = searchValue.trim() !== ''
   return (
     <div
-      className="compare-filters-bar compare-filters-bar--above-table"
+      className={
+        help
+          ? 'compare-filters-bar compare-filters-bar--above-table compare-filters-bar--with-help'
+          : 'compare-filters-bar compare-filters-bar--above-table'
+      }
       role="group"
       aria-label="Buscar y filtrar por fecha"
     >
+      {help && <HelpPopoverButton ariaLabel="Ayuda sobre filtros">{help}</HelpPopoverButton>}
       <div className="compare-filters-bar__search" role="search" aria-label="Buscar movimientos">
         <span className="compare-date-toolbar-label">Buscar</span>
         <div className="compare-filters-search-split">
@@ -4103,72 +4240,57 @@ export default function ConciliacionPage() {
               />
               <PendingGuide />
 
-              <div className="detail-view-toggle" role="tablist" aria-label="Vista de detalle">
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={detailLayout === 'compare'}
-                  className={detailLayout === 'compare' ? 'session-pill active' : 'session-pill'}
-                  onClick={() => setDetailLayout('compare')}
-                >
-                  Comparativa
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={detailLayout === 'complete'}
-                  className={detailLayout === 'complete' ? 'session-pill active' : 'session-pill'}
-                  onClick={() => setDetailLayout('complete')}
-                >
-                  Completa
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={detailLayout === 'rubro'}
-                  className={detailLayout === 'rubro' ? 'session-pill active' : 'session-pill'}
-                  onClick={() => setDetailLayout('rubro')}
-                >
-                  Por rubro
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={detailLayout === 'classic'}
-                  className={detailLayout === 'classic' ? 'session-pill active' : 'session-pill'}
-                  onClick={() => setDetailLayout('classic')}
-                >
-                  Tablas clásicas
-                </button>
+              <div className="detail-view-toggle-wrap">
+                <span className="detail-view-toggle-label">Vistas</span>
+                <div className="detail-view-toggle" role="tablist" aria-label="Vistas de detalle">
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={detailLayout === 'compare'}
+                    className={detailLayout === 'compare' ? 'session-pill active' : 'session-pill'}
+                    onClick={() => setDetailLayout('compare')}
+                  >
+                    Comparativa
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={detailLayout === 'complete'}
+                    className={detailLayout === 'complete' ? 'session-pill active' : 'session-pill'}
+                    onClick={() => setDetailLayout('complete')}
+                  >
+                    Completa
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={detailLayout === 'rubro'}
+                    className={detailLayout === 'rubro' ? 'session-pill active' : 'session-pill'}
+                    onClick={() => setDetailLayout('rubro')}
+                  >
+                    Por rubro
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={detailLayout === 'classic'}
+                    className={detailLayout === 'classic' ? 'session-pill active' : 'session-pill'}
+                    onClick={() => setDetailLayout('classic')}
+                  >
+                    Tablas clásicas
+                  </button>
+                </div>
               </div>
 
               {detailLayout === 'compare' ? (
                 <>
                   <h3 className="subsection-title">
-                    Comparación (
+                    Filtros (
                     {compareRowFilterActive
                       ? `${filteredComparisonRows.length} de ${comparisonRows.length}`
                       : `${comparisonRows.length} filas`}
                     )
                   </h3>
-                  <p className="hint compare-hint">
-                    Tocá un color (o «Todos») para ver solo filas de ese estado; en la barra de abajo,
-                    buscá por ID, referencia, descripción o importe (mitad izquierda), filtrá por
-                    clasificación si querés (mitad derecha) y acotá por fechas (extremo derecho). La
-                    grilla se ordena: pares, pendientes banco, pendientes empresa.
-                    {effectiveSessionAmountTolerance !== undefined ? (
-                      <>
-                        {' '}
-                        «Δ importe» solo si la brecha supera la tolerancia de la última conciliación (±
-                        {formatToleranceInputDisplay(
-                          Number(effectiveSessionAmountTolerance),
-                        )}
-                        ).
-                      </>
-                    ) : (
-                      <> «Δ importe» usa umbral 0,02 hasta que concilies con tolerancia propia.</>
-                    )}
-                  </p>
                   <ComparisonLegend
                     filter={compareFilter}
                     onFilter={setCompareFilter}
@@ -4189,6 +4311,11 @@ export default function ConciliacionPage() {
                       setCompareDateFrom('')
                       setCompareDateTo('')
                     }}
+                    help={
+                      <CompareViewHelpText
+                        effectiveSessionAmountTolerance={effectiveSessionAmountTolerance}
+                      />
+                    }
                   />
                   <ComparisonTable
                     rows={filteredComparisonRows}
@@ -4221,12 +4348,6 @@ export default function ConciliacionPage() {
                       : `${comparisonRows.length}`}{' '}
                     filas)
                   </h3>
-                  <p className="hint compare-hint">
-                    Todas las filas en una sola tabla, ordenadas por fecha. En cada par se usa la
-                    fecha más temprana entre banco y empresa. Los pendientes muestran solo un lado;
-                    el otro queda vacío (—). Debajo de la leyenda, la misma barra: búsqueda y filtro por
-                    clasificación, y fechas a la derecha.
-                  </p>
                   <CompleteViewLegendStatic />
                   <CompareFiltersBar
                     searchValue={compareSearchQuery}
@@ -4243,6 +4364,7 @@ export default function ConciliacionPage() {
                       setCompareDateFrom('')
                       setCompareDateTo('')
                     }}
+                    help={<CompleteViewHelpText />}
                   />
                   <ComparisonTable
                     rows={filteredChronologicalRows}
@@ -4268,12 +4390,13 @@ export default function ConciliacionPage() {
                 </>
               ) : detailLayout === 'rubro' ? (
                 <>
-                  <h3 className="subsection-title">Vista por rubro</h3>
-                  <p className="hint compare-hint">
-                    Compará sumas por concepto. Con <strong>Comparar cruzado</strong> elegís grupo banco y grupo
-                    empresa; en el panel podés <strong>vincular</strong> dos movimientos pendientes (clic en la
-                    fila de cada lado).
-                  </p>
+                  <SubsectionTitleRow
+                    help={<RubroViewHelpText />}
+                    helpAriaLabel="Ayuda sobre la vista por rubro"
+                    helpDialogLabel="Ayuda de la vista por rubro"
+                  >
+                    Vista por rubro
+                  </SubsectionTitleRow>
                   <RubroGroupsView
                     detail={detail}
                     sessionAmountTolerance={effectiveSessionAmountTolerance}
@@ -4300,11 +4423,6 @@ export default function ConciliacionPage() {
                       : `${comparisonRows.length} filas`}
                     )
                   </h3>
-                  <p className="hint compare-hint">
-                    Mismos filtros que en Comparativa: tipo de fila, búsqueda (ID, ref., importe),
-                    clasificación y fechas; las tres tablas muestran solo lo que cumple todos los
-                    criterios activos.
-                  </p>
                   <ComparisonLegend
                     filter={compareFilter}
                     onFilter={setCompareFilter}
@@ -4325,6 +4443,7 @@ export default function ConciliacionPage() {
                       setCompareDateFrom('')
                       setCompareDateTo('')
                     }}
+                    help={<ClassicViewHelpText />}
                   />
                   <h3 className="subsection-title">
                     Pares encontrados (

@@ -590,11 +590,18 @@ export function RubroGroupsView({
                 const open = expandedKey === g.groupKey
                 const bankPicked = pickBankKey === g.groupKey
                 const companyPicked = pickCompanyKey === g.groupKey
+                const rowClassName = [
+                  'rubro-summary-row',
+                  g.isSinRubro ? 'rubro-summary-row--sin' : '',
+                  open ? 'rubro-summary-row--open' : '',
+                  bankPicked ? 'rubro-summary-row--picked-bank' : '',
+                  companyPicked ? 'rubro-summary-row--picked-company' : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ')
                 return (
                   <Fragment key={g.groupKey}>
-                    <tr
-                      className={`rubro-summary-row ${g.isSinRubro ? 'rubro-summary-row--sin' : ''} ${open ? 'rubro-summary-row--open' : ''} ${bankPicked || companyPicked ? 'rubro-summary-row--picked' : ''}`}
-                    >
+                    <tr className={rowClassName}>
                       <td>
                         <button
                           type="button"
