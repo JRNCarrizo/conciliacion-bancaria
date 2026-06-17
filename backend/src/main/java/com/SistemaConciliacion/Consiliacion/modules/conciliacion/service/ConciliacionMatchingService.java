@@ -75,7 +75,7 @@ public class ConciliacionMatchingService {
 		ReconciliationSession session = sessionRepository.findById(sessionId)
 				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sesión no encontrada"));
 		if (session.getStatus() == SessionStatus.CLOSED) {
-			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "La sesión está cerrada; no se puede conciliar.");
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "La conciliación está cerrada; no se puede conciliar.");
 		}
 
 		List<Long> autoPairIds = reconciliationPairRepository.findIdsBySessionIdAndMatchSource(sessionId,

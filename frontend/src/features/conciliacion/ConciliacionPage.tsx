@@ -587,7 +587,7 @@ function SessionBalancesForm({
       <h3 className="subsection-title">Saldos del período (opcional)</h3>
       {readOnly ? (
         <p className="hint balances-locked-hint">
-          <strong>Sesión cerrada:</strong> saldos y clasificación de pendientes en solo lectura.
+          <strong>Conciliación cerrada:</strong> saldos y clasificación de pendientes en solo lectura.
         </p>
       ) : (
         <p className="hint">
@@ -1619,7 +1619,7 @@ function PendingAttachmentsModal({
             máx. 20 MB.
           </p>
           {sessionClosed && (
-            <p className="msg subtle comment-modal-readonly">Sesión cerrada: solo lectura y descarga.</p>
+            <p className="msg subtle comment-modal-readonly">Conciliación cerrada: solo lectura y descarga.</p>
           )}
           <PendingAttachmentSidePanel
             kind="pair"
@@ -1657,7 +1657,7 @@ function PendingAttachmentsModal({
           servidor.
         </p>
         {sessionClosed && (
-          <p className="msg subtle comment-modal-readonly">Sesión cerrada: solo lectura y descarga.</p>
+          <p className="msg subtle comment-modal-readonly">Conciliación cerrada: solo lectura y descarga.</p>
         )}
         <PendingAttachmentSidePanel
           kind="movement"
@@ -2098,7 +2098,7 @@ function PendingCommentsModal({
             Un solo hilo por fila conciliada (par).
           </p>
           {sessionClosed && (
-            <p className="msg subtle comment-modal-readonly">Sesión cerrada: solo lectura.</p>
+            <p className="msg subtle comment-modal-readonly">Conciliación cerrada: solo lectura.</p>
           )}
           <PairCommentPanel
             sessionId={sessionId}
@@ -2134,7 +2134,7 @@ function PendingCommentsModal({
           El historial queda guardado en esta sesión junto al movimiento (conciliado o pendiente).
         </p>
         {sessionClosed && (
-          <p className="msg subtle comment-modal-readonly">Sesión cerrada: solo lectura.</p>
+          <p className="msg subtle comment-modal-readonly">Conciliación cerrada: solo lectura.</p>
         )}
         <PendingCommentSidePanel
           sessionId={sessionId}
@@ -3188,7 +3188,7 @@ export default function ConciliacionPage() {
     if (selectedId == null) return
     if (
       !window.confirm(
-        '¿Cerrar esta sesión? Quedarán fijos los saldos, la clasificación de pendientes y no podrás ejecutar conciliación automática ni modificar vínculos.',
+        '¿Cerrar esta conciliación? Quedarán fijos los saldos, la clasificación de pendientes y no podrás ejecutar conciliación automática ni modificar vínculos.',
       )
     ) {
       return
@@ -3213,7 +3213,7 @@ export default function ConciliacionPage() {
     if (selectedId == null || user?.role !== 'ADMIN') return
     if (
       !window.confirm(
-        '¿Reabrir esta sesión? Volverán a poder modificarse saldos, clasificación y conciliación. Quedará registrado en Actividad.',
+        '¿Reabrir esta conciliación? Volverán a poder modificarse saldos, clasificación y conciliación. Quedará registrado en Actividad.',
       )
     ) {
       return
@@ -3917,7 +3917,7 @@ export default function ConciliacionPage() {
                       disabled={closeSessionLoading}
                       onClick={() => void handleCloseSession()}
                     >
-                      {closeSessionLoading ? 'Cerrando…' : 'Cerrar sesión'}
+                      {closeSessionLoading ? 'Cerrando…' : 'Cerrar conciliación'}
                     </button>
                   )}
                   {detailMatchesSelection && !detailLoading && sessionClosed && user?.role === 'ADMIN' && (
@@ -3928,7 +3928,7 @@ export default function ConciliacionPage() {
                       onClick={() => void handleReopenSession()}
                       title="Solo administrador; queda registrado en Actividad"
                     >
-                      {reopenSessionLoading ? 'Reabriendo…' : 'Reabrir sesión'}
+                      {reopenSessionLoading ? 'Reabriendo…' : 'Reabrir conciliación'}
                     </button>
                   )}
                 </div>
@@ -3936,12 +3936,12 @@ export default function ConciliacionPage() {
 
               {detailMatchesSelection && !detailLoading && sessionClosed && (
                 <div className="session-closed-banner" role="status">
-                  Sesión cerrada: saldos, clasificación de pendientes y conciliación automática bloqueados.
+                  Conciliación cerrada: saldos, clasificación de pendientes y conciliación automática bloqueados.
                   Podés consultar y exportar.
                   {user?.role === 'ADMIN' && (
                     <>
                       {' '}
-                      Como administrador podés usar <strong>Reabrir sesión</strong>; el motivo opcional queda en{' '}
+                      Como administrador podés usar <strong>Reabrir conciliación</strong>; el motivo opcional queda en{' '}
                       <strong>Actividad</strong>.
                     </>
                   )}

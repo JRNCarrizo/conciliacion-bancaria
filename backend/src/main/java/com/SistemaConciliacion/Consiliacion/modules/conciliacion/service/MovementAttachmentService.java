@@ -71,7 +71,7 @@ public class MovementAttachmentService {
 				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sesión no encontrada"));
 		if (session.getStatus() == SessionStatus.CLOSED) {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-					"La sesión está cerrada; no se pueden subir archivos.");
+					"La conciliación está cerrada; no se pueden subir archivos.");
 		}
 		assertMovementInSession(sessionId, side, txId);
 		if (file == null || file.isEmpty()) {
@@ -125,7 +125,7 @@ public class MovementAttachmentService {
 				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sesión no encontrada"));
 		if (session.getStatus() == SessionStatus.CLOSED) {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-					"La sesión está cerrada; no se pueden eliminar archivos.");
+					"La conciliación está cerrada; no se pueden eliminar archivos.");
 		}
 		MovementAttachment a = movementAttachmentRepository
 				.findByIdAndSession_IdAndMovementSideAndMovementId(attachmentId, sessionId, side, txId)

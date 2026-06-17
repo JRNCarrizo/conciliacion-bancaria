@@ -218,7 +218,7 @@ public class ConciliacionSessionService {
 		ReconciliationSession s = sessionRepository.findById(sessionId)
 				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sesión no encontrada"));
 		if (s.getStatus() == SessionStatus.CLOSED) {
-			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "La sesión ya está cerrada.");
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "La conciliación ya está cerrada.");
 		}
 		s.setStatus(SessionStatus.CLOSED);
 		sessionRepository.save(s);
@@ -234,7 +234,7 @@ public class ConciliacionSessionService {
 		ReconciliationSession s = sessionRepository.findById(sessionId)
 				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sesión no encontrada"));
 		if (s.getStatus() != SessionStatus.CLOSED) {
-			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "La sesión no está cerrada.");
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "La conciliación no está cerrada.");
 		}
 		long pairCount = reconciliationPairRepository.countBySession_Id(sessionId);
 		s.setStatus(pairCount > 0 ? SessionStatus.RECONCILED : SessionStatus.IMPORTED);
@@ -256,7 +256,7 @@ public class ConciliacionSessionService {
 				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sesión no encontrada"));
 		if (s.getStatus() == SessionStatus.CLOSED) {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-					"La sesión está cerrada; los saldos no se pueden modificar.");
+					"La conciliación está cerrada; los saldos no se pueden modificar.");
 		}
 		s.setOpeningBankBalance(dto.openingBankBalance());
 		s.setClosingBankBalance(dto.closingBankBalance());
@@ -273,7 +273,7 @@ public class ConciliacionSessionService {
 				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sesión no encontrada"));
 		if (session.getStatus() == SessionStatus.CLOSED) {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-					"La sesión está cerrada; la clasificación no se puede modificar.");
+					"La conciliación está cerrada; la clasificación no se puede modificar.");
 		}
 		if (reconciliationPairRepository.existsByBankTransaction_Id(bankTxId)) {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
@@ -291,7 +291,7 @@ public class ConciliacionSessionService {
 				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sesión no encontrada"));
 		if (session.getStatus() == SessionStatus.CLOSED) {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-					"La sesión está cerrada; la clasificación no se puede modificar.");
+					"La conciliación está cerrada; la clasificación no se puede modificar.");
 		}
 		if (reconciliationPairRepository.existsByCompanyTransaction_Id(companyTxId)) {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
@@ -309,7 +309,7 @@ public class ConciliacionSessionService {
 				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sesión no encontrada"));
 		if (session.getStatus() == SessionStatus.CLOSED) {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-					"La sesión está cerrada; la clasificación no se puede modificar.");
+					"La conciliación está cerrada; la clasificación no se puede modificar.");
 		}
 		ReconciliationPair pair = reconciliationPairRepository.findByIdAndSession_Id(pairId, sessionId)
 				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Par no encontrado"));
@@ -334,7 +334,7 @@ public class ConciliacionSessionService {
 				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sesión no encontrada"));
 		if (session.getStatus() == SessionStatus.CLOSED) {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-					"La sesión está cerrada; no se pueden agregar comentarios.");
+					"La conciliación está cerrada; no se pueden agregar comentarios.");
 		}
 		String text = dto == null || dto.text() == null ? "" : dto.text().trim();
 		if (text.isEmpty()) {
@@ -379,7 +379,7 @@ public class ConciliacionSessionService {
 				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sesión no encontrada"));
 		if (session.getStatus() == SessionStatus.CLOSED) {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-					"La sesión está cerrada; no se pueden agregar comentarios.");
+					"La conciliación está cerrada; no se pueden agregar comentarios.");
 		}
 		ReconciliationPair pair = reconciliationPairRepository.findByIdAndSession_Id(pairId, sessionId)
 				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Par no encontrado"));

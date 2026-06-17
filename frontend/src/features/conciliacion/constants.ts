@@ -71,5 +71,5 @@ export const STATUS_LABEL: Record<string, string> = {
 export const SESSION_STATUS_LABEL: Record<string, string> = {
   IMPORTED: 'Importada',
   RECONCILED: 'Conciliada',
-  CLOSED: 'Cerrada',
+  CLOSED: 'Conciliación cerrada',
 }

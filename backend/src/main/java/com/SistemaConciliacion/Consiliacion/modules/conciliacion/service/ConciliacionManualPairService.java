@@ -52,7 +52,7 @@ public class ConciliacionManualPairService {
 		ReconciliationSession session = sessionRepository.findById(sessionId)
 				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sesión no encontrada"));
 		if (session.getStatus() == SessionStatus.CLOSED) {
-			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "La sesión está cerrada; no se pueden crear pares.");
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "La conciliación está cerrada; no se pueden crear pares.");
 		}
 
 		BankTransaction bank = bankTransactionRepository.findByIdAndSession_Id(bankTransactionId, sessionId)
@@ -85,7 +85,7 @@ public class ConciliacionManualPairService {
 		ReconciliationSession session = sessionRepository.findById(sessionId)
 				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sesión no encontrada"));
 		if (session.getStatus() == SessionStatus.CLOSED) {
-			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "La sesión está cerrada; no se pueden quitar pares.");
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "La conciliación está cerrada; no se pueden quitar pares.");
 		}
 		ReconciliationPair p = reconciliationPairRepository.findByIdAndSession_Id(pairId, sessionId)
 				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Par no encontrado."));

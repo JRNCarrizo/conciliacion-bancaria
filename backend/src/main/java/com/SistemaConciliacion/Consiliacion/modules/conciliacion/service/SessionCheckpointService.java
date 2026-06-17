@@ -78,7 +78,7 @@ public class SessionCheckpointService {
 				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sesión no encontrada"));
 		if (session.getStatus() == SessionStatus.CLOSED) {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-					"La sesión está cerrada; no se pueden guardar cortes.");
+					"La conciliación está cerrada; no se pueden guardar cortes.");
 		}
 
 		String trimmedNote = note == null ? null : note.trim();

@@ -76,8 +76,8 @@ public class SessionAuditService {
 			case IMPORT -> "Importó archivos";
 			case RECONCILE -> "Conciliar (automático)";
 			case SAVE_BALANCES -> "Guardó saldos";
-			case CLOSE_SESSION -> "Cerró la sesión";
-			case REOPEN_SESSION -> "Reabrió la sesión";
+			case CLOSE_SESSION -> "Cerró la conciliación";
+			case REOPEN_SESSION -> "Reabrió la conciliación";
 			case VIEW_DETAIL -> "Abrió el detalle de la sesión";
 			case UNLINK_PAIR -> "Desvinculó un par";
 			case SAVE_CHECKPOINT -> "Guardó corte de jornada";
