@@ -204,6 +204,7 @@ export function SessionCheckpointsSection({
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [selected, setSelected] = useState<SessionCheckpoint | null>(null)
+  const [expanded, setExpanded] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -224,49 +225,100 @@ export function SessionCheckpointsSection({
     void load()
   }, [load, refreshKey])
 
+  useEffect(() => {
+    setExpanded(false)
+    setSelected(null)
+  }, [sessionId])
+
+  const latestCheckpoint = checkpoints.length > 0 ? checkpoints[0] : null
+
+  const checkpointsBadgeLabel = loading
+    ? 'Cargando…'
+    : checkpoints.length === 0
+      ? 'Sin cortes'
+      : checkpoints.length === 1
+        ? '1 corte'
+        : `${checkpoints.length} cortes`
+
+  const checkpointsMeta = !expanded
+    ? loading
+      ? null
+      : error
+        ? 'No se pudo cargar la lista'
+        : latestCheckpoint
+          ? `Último: ${checkpointDayLabel(latestCheckpoint.createdAt)}`
+          : 'Al salir se archivará el estado del día'
+    : null
+
   return (
-    <section className="session-checkpoints" aria-labelledby="session-checkpoints-title">
-      <div className="session-checkpoints-head">
-        <div>
-          <h4 id="session-checkpoints-title" className="session-checkpoints-title">
-            Cortes de jornada
-          </h4>
+    <section
+      className={
+        expanded
+          ? 'checkpoints-disclosure conc-panel-disclosure conc-panel-disclosure--open'
+          : 'checkpoints-disclosure conc-panel-disclosure conc-panel-disclosure--collapsed'
+      }
+      aria-labelledby="session-checkpoints-title"
+    >
+      <button
+        type="button"
+        id="session-checkpoints-title"
+        aria-expanded={expanded}
+        className="conc-panel-disclosure-summary"
+        onClick={() => setExpanded((open) => !open)}
+      >
+        <span className="conc-panel-disclosure-title">Cortes de jornada</span>
+        <span
+          className={
+            loading || checkpoints.length === 0
+              ? 'conc-panel-disclosure-badge conc-panel-disclosure-badge--neutral'
+              : 'conc-panel-disclosure-badge conc-panel-disclosure-badge--active'
+          }
+        >
+          {checkpointsBadgeLabel}
+        </span>
+        {checkpointsMeta ? (
+          <span className="conc-panel-disclosure-meta">{checkpointsMeta}</span>
+        ) : null}
+      </button>
+
+      {expanded && (
+        <div className="conc-panel-disclosure-body">
           <p className="session-checkpoints-hint">
-            Fotos consultables del avance (PDF + resumen). Al pulsar <strong>Salir</strong> podés
-            dejar una nota opcional; la conciliación sigue abierta entre cortes.
+            Fotos consultables del avance (PDF + resumen). Al pulsar <strong>Salir</strong> podés dejar una nota
+            opcional; la conciliación sigue abierta entre cortes.
           </p>
+
+          {loading ? <p className="msg subtle">Cargando cortes…</p> : null}
+          {error ? <p className="msg err">{error}</p> : null}
+          {!loading && !error && checkpoints.length === 0 ? (
+            <p className="msg subtle session-checkpoints-empty">
+              Todavía no hay cortes. Al salir del sistema se archivará el estado del día.
+            </p>
+          ) : null}
+
+          {!loading && !error && checkpoints.length > 0 ? (
+            <ul className="session-checkpoint-list">
+              {checkpoints.map((cp) => {
+                const pendingTotal = cp.unmatchedBankCount + cp.unmatchedCompanyCount
+                return (
+                  <li key={cp.id}>
+                    <button type="button" className="session-checkpoint-row" onClick={() => setSelected(cp)}>
+                      <span className="session-checkpoint-row-main">
+                        <span className="session-checkpoint-row-day">{checkpointDayLabel(cp.createdAt)}</span>
+                        <span className="session-checkpoint-row-time">{checkpointTimeLabel(cp.createdAt)}</span>
+                      </span>
+                      <span className="session-checkpoint-row-stats">
+                        {cp.matchedPairs} pares · {pendingTotal} pend.
+                      </span>
+                      <span className="session-checkpoint-row-user">{formatCommentAuthor(cp.createdByUsername)}</span>
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+          ) : null}
         </div>
-      </div>
-
-      {loading ? <p className="msg subtle">Cargando cortes…</p> : null}
-      {error ? <p className="msg err">{error}</p> : null}
-      {!loading && !error && checkpoints.length === 0 ? (
-        <p className="msg subtle session-checkpoints-empty">
-          Todavía no hay cortes. Al salir del sistema se archivará el estado del día.
-        </p>
-      ) : null}
-
-      {!loading && !error && checkpoints.length > 0 ? (
-        <ul className="session-checkpoint-list">
-          {checkpoints.map((cp) => {
-            const pendingTotal = cp.unmatchedBankCount + cp.unmatchedCompanyCount
-            return (
-              <li key={cp.id}>
-                <button type="button" className="session-checkpoint-row" onClick={() => setSelected(cp)}>
-                  <span className="session-checkpoint-row-main">
-                    <span className="session-checkpoint-row-day">{checkpointDayLabel(cp.createdAt)}</span>
-                    <span className="session-checkpoint-row-time">{checkpointTimeLabel(cp.createdAt)}</span>
-                  </span>
-                  <span className="session-checkpoint-row-stats">
-                    {cp.matchedPairs} pares · {pendingTotal} pend.
-                  </span>
-                  <span className="session-checkpoint-row-user">{formatCommentAuthor(cp.createdByUsername)}</span>
-                </button>
-              </li>
-            )
-          })}
-        </ul>
-      ) : null}
+      )}
 
       {selected ? (
         <CheckpointDetailModal sessionId={sessionId} checkpoint={selected} onClose={() => setSelected(null)} />

@@ -190,6 +190,77 @@ export function crossGroupComparison(
   return { delta, squared: Math.abs(delta) <= tol }
 }
 
+export function aggregateCrossComparison(
+  bankGroups: readonly RubroGroupRow[],
+  companyGroups: readonly RubroGroupRow[],
+  sessionAmountTolerance: number | null | undefined,
+) {
+  const bankSum = bankGroups.reduce((s, g) => s + g.bankSum, 0)
+  const companySum = companyGroups.reduce((s, g) => s + g.companySum, 0)
+  const bankCount = bankGroups.reduce((s, g) => s + g.bankCount, 0)
+  const companyCount = companyGroups.reduce((s, g) => s + g.companyCount, 0)
+  const tol = amountGapThreshold(sessionAmountTolerance)
+  const delta = companySum - bankSum
+  return {
+    bankSum,
+    companySum,
+    bankCount,
+    companyCount,
+    delta,
+    squared: Math.abs(delta) <= tol,
+  }
+}
+
+export function mergedBankItems(groups: readonly RubroGroupRow[]): RubroMovementRef[] {
+  return groups
+    .flatMap((g) => g.bankItems)
+    .sort((x, y) => x.m.txDate.localeCompare(y.m.txDate) || x.m.id - y.m.id)
+}
+
+export function mergedCompanyItems(groups: readonly RubroGroupRow[]): RubroMovementRef[] {
+  return groups
+    .flatMap((g) => g.companyItems)
+    .sort((x, y) => x.m.txDate.localeCompare(y.m.txDate) || x.m.id - y.m.id)
+}
+
+export type BulkClassificationTarget = {
+  bankPendingIds: number[]
+  companyPendingIds: number[]
+  pairIds: number[]
+}
+
+export function collectBulkClassificationTargets(
+  bankGroups: readonly RubroGroupRow[],
+  companyGroups: readonly RubroGroupRow[],
+): BulkClassificationTarget {
+  const bankPendingIds = new Set<number>()
+  const companyPendingIds = new Set<number>()
+  const pairIds = new Set<number>()
+
+  for (const g of bankGroups) {
+    for (const { m, pairId } of g.bankItems) {
+      if (pairId != null) pairIds.add(pairId)
+      else bankPendingIds.add(m.id)
+    }
+  }
+  for (const g of companyGroups) {
+    for (const { m, pairId } of g.companyItems) {
+      if (pairId != null) pairIds.add(pairId)
+      else companyPendingIds.add(m.id)
+    }
+  }
+
+  return {
+    bankPendingIds: [...bankPendingIds],
+    companyPendingIds: [...companyPendingIds],
+    pairIds: [...pairIds],
+  }
+}
+
+export function bulkClassificationTargetCount(t: BulkClassificationTarget): number {
+  return t.bankPendingIds.length + t.companyPendingIds.length + t.pairIds.length
+}
+
 export function rubroGroupsSummary(groups: RubroGroupRow[]) {
   const withRubro = groups.filter((g) => !g.isSinRubro)
   const squared = withRubro.filter((g) => g.squared).length

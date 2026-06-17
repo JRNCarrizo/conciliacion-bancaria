@@ -1,8 +1,13 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import type { SessionDetail } from './types'
+import { ClassificationComboControlled } from './ClassificationCombo'
 import {
+  aggregateCrossComparison,
   buildRubroGroups,
-  crossGroupComparison,
+  bulkClassificationTargetCount,
+  collectBulkClassificationTargets,
+  mergedBankItems,
+  mergedCompanyItems,
   rubroGroupsSummary,
   SIN_DETALLE_LABEL,
   SIN_RUBRO_LABEL,
@@ -10,9 +15,10 @@ import {
   type RubroGroupRow,
 } from './utils/rubroGroups'
 import { PairPreviewModal } from './PairPreviewModal'
+import { RubroLinkConfirmModal, usePendingPairLinkPicker } from './RubroLinkConfirmModal'
 import { movementSummaryLine } from './utils/counterpartUtils'
 import { resolvePairPreview } from './utils/pairLookup'
-import { formatAmount, formatDisplayDate, formatToleranceInputDisplay } from './utils/format'
+import { formatAmount, formatDisplayDate } from './utils/format'
 
 function MovementMiniTable({
   title,
@@ -49,6 +55,12 @@ function MovementMiniTable({
       ) : null}
       <div className="table-wrap rubro-detail-table-wrap">
         <table className="data-table rubro-detail-table">
+          <colgroup>
+            <col className="rubro-detail-col-id" />
+            <col className="rubro-detail-col-date" />
+            <col className="rubro-detail-col-amount" />
+            <col className="rubro-detail-col-desc" />
+          </colgroup>
           <thead>
             <tr>
               <th>ID</th>
@@ -67,8 +79,9 @@ function MovementMiniTable({
                   key={m.id}
                   className={selected ? 'rubro-detail-row--selected' : undefined}
                 >
-                  <td>
-                    {m.id}
+                  <td className="rubro-detail-id-td">
+                    <span className="rubro-detail-id-cell">
+                      <span className="rubro-detail-id-num">{m.id}</span>
                     {pairId != null ? (
                       <button
                         type="button"
@@ -81,29 +94,36 @@ function MovementMiniTable({
                       >
                         par
                       </button>
-                    ) : linkMode ? (
-                      <button
-                        type="button"
-                        className={
-                          selected
-                            ? 'rubro-detail-pending-btn rubro-detail-pending-btn--active'
-                            : 'rubro-detail-pending-btn'
-                        }
-                        disabled={!canToggle}
-                        aria-pressed={selected}
-                        title={
-                          selected
-                            ? 'Quitar selección para vincular'
-                            : 'Seleccionar para vincular con el otro lado'
-                        }
-                        onClick={(ev) => {
-                          ev.stopPropagation()
-                          if (canToggle) onToggleTxId(m.id)
-                        }}
-                      >
-                        pend.
-                      </button>
+                    ) : pending ? (
+                      linkMode && onToggleTxId != null ? (
+                        <button
+                          type="button"
+                          className={
+                            selected
+                              ? 'rubro-detail-pending-btn rubro-detail-pending-btn--active'
+                              : 'rubro-detail-pending-btn'
+                          }
+                          disabled={!canToggle}
+                          aria-pressed={selected}
+                          title={
+                            selected
+                              ? 'Quitar selección para vincular'
+                              : 'Seleccionar para vincular con el otro lado'
+                          }
+                          onClick={(ev) => {
+                            ev.stopPropagation()
+                            if (canToggle) onToggleTxId(m.id)
+                          }}
+                        >
+                          pend.
+                        </button>
+                      ) : (
+                        <span className="rubro-detail-pending-badge" title="Pendiente de conciliar">
+                          pend.
+                        </span>
+                      )
                     ) : null}
+                    </span>
                   </td>
                   <td className="cell-date-nowrap">{formatDisplayDate(m.txDate)}</td>
                   <td>{formatAmount(m.amount)}</td>
@@ -119,72 +139,110 @@ function MovementMiniTable({
 }
 
 function CrossGroupComparePanel({
-  bankGroup,
-  companyGroup,
+  bankGroups,
+  companyGroups,
   sessionAmountTolerance,
-  tolLabel,
   reconcileLocked,
+  classificationReadOnly,
+  classificationSuggestions,
   linkLoading,
   linkError,
+  classifyLoading,
+  classifyError,
   onClear,
   onManualPair,
   onViewPair,
+  onBulkClassify,
+  onRemoveBankKey,
+  onRemoveCompanyKey,
 }: {
-  bankGroup?: RubroGroupRow
-  companyGroup?: RubroGroupRow
+  bankGroups: RubroGroupRow[]
+  companyGroups: RubroGroupRow[]
   sessionAmountTolerance: number | null | undefined
-  tolLabel: string
   reconcileLocked: boolean
+  classificationReadOnly: boolean
+  classificationSuggestions: readonly string[]
   linkLoading: boolean
   linkError: string | null
+  classifyLoading: boolean
+  classifyError: string | null
   onClear: () => void
   onManualPair?: (bankId: number, companyId: number) => void
   onViewPair?: (pairId: number) => void
+  onBulkClassify: (classification: string) => Promise<void>
+  onRemoveBankKey: (groupKey: string) => void
+  onRemoveCompanyKey: (groupKey: string) => void
 }) {
-  const hasBank = bankGroup != null
-  const hasCompany = companyGroup != null
+  const hasBank = bankGroups.length > 0
+  const hasCompany = companyGroups.length > 0
   const bothSides = hasBank && hasCompany
 
-  const comparison = useMemo(() => {
-    if (!bothSides || !bankGroup || !companyGroup) return null
-    return crossGroupComparison(bankGroup, companyGroup, sessionAmountTolerance)
-  }, [bothSides, bankGroup, companyGroup, sessionAmountTolerance])
-
-  const linkableBank = useMemo(
-    () => (bankGroup ? bankGroup.bankItems.filter((i) => i.pairId == null) : []),
-    [bankGroup],
-  )
-  const linkableCompany = useMemo(
-    () => (companyGroup ? companyGroup.companyItems.filter((i) => i.pairId == null) : []),
-    [companyGroup],
+  const metrics = useMemo(
+    () => aggregateCrossComparison(bankGroups, companyGroups, sessionAmountTolerance),
+    [bankGroups, companyGroups, sessionAmountTolerance],
   )
 
-  const [selectedBankId, setSelectedBankId] = useState<number | null>(null)
-  const [selectedCompanyId, setSelectedCompanyId] = useState<number | null>(null)
+  const bankItems = useMemo(() => mergedBankItems(bankGroups), [bankGroups])
+  const companyItems = useMemo(() => mergedCompanyItems(companyGroups), [companyGroups])
 
-  useEffect(() => {
-    setSelectedBankId(linkableBank.length === 1 ? linkableBank[0].m.id : null)
-  }, [bankGroup?.groupKey, linkableBank])
+  const linkableBank = useMemo(() => bankItems.filter((i) => i.pairId == null), [bankItems])
+  const linkableCompany = useMemo(() => companyItems.filter((i) => i.pairId == null), [companyItems])
 
-  useEffect(() => {
-    setSelectedCompanyId(linkableCompany.length === 1 ? linkableCompany[0].m.id : null)
-  }, [companyGroup?.groupKey, linkableCompany])
-
-  const canLink =
-    !reconcileLocked &&
-    onManualPair != null &&
-    selectedBankId != null &&
-    selectedCompanyId != null &&
-    linkableBank.some((i) => i.m.id === selectedBankId) &&
-    linkableCompany.some((i) => i.m.id === selectedCompanyId)
+  const classifyTargets = useMemo(
+    () => collectBulkClassificationTargets(bankGroups, companyGroups),
+    [bankGroups, companyGroups],
+  )
+  const classifyCount = bulkClassificationTargetCount(classifyTargets)
 
   const linkMode = bothSides && !reconcileLocked && onManualPair != null
 
+  const linkPickerResetKey = useMemo(
+    () =>
+      [
+        ...bankGroups.map((g) => g.groupKey),
+        ...companyGroups.map((g) => g.groupKey),
+        ...linkableBank.map((i) => i.m.id),
+        ...linkableCompany.map((i) => i.m.id),
+      ].join('|'),
+    [bankGroups, companyGroups, linkableBank, linkableCompany],
+  )
+
+  const {
+    selectedBankId,
+    selectedCompanyId,
+    toggleBank,
+    toggleCompany,
+    prompt: linkPrompt,
+    dismissPrompt: dismissLinkPrompt,
+  } = usePendingPairLinkPicker(linkMode, linkableBank, linkableCompany, linkPickerResetKey)
+
+  const [classifyDraft, setClassifyDraft] = useState('')
+
   const panelTitle = bothSides
-    ? 'Comparación cruzada (banco ↔ empresa)'
+    ? `Comparación cruzada (${bankGroups.length} banco · ${companyGroups.length} empresa)`
     : hasBank
-      ? 'Vista previa — grupo banco'
-      : 'Vista previa — grupo empresa'
+      ? `Vista previa — ${bankGroups.length} grupo${bankGroups.length === 1 ? '' : 's'} banco`
+      : `Vista previa — ${companyGroups.length} grupo${companyGroups.length === 1 ? '' : 's'} empresa`
+
+  async function applyBulkClassification() {
+    const label = classifyDraft.trim()
+    const parts: string[] = []
+    if (classifyTargets.bankPendingIds.length > 0) {
+      parts.push(`${classifyTargets.bankPendingIds.length} banco`)
+    }
+    if (classifyTargets.companyPendingIds.length > 0) {
+      parts.push(`${classifyTargets.companyPendingIds.length} empresa`)
+    }
+    if (classifyTargets.pairIds.length > 0) {
+      parts.push(`${classifyTargets.pairIds.length} par${classifyTargets.pairIds.length === 1 ? '' : 'es'}`)
+    }
+    const detail = parts.join(', ')
+    const msg = label
+      ? `¿Asignar clasificación «${label}» a ${classifyCount} movimiento${classifyCount === 1 ? '' : 's'} (${detail})?`
+      : `¿Quitar clasificación de ${classifyCount} movimiento${classifyCount === 1 ? '' : 's'} (${detail})?`
+    if (!window.confirm(msg)) return
+    await onBulkClassify(label)
+  }
 
   return (
     <section className="rubro-cross-compare" aria-label="Comparación entre grupos elegidos">
@@ -195,38 +253,70 @@ function CrossGroupComparePanel({
         </button>
       </header>
 
+      {(hasBank || hasCompany) && (
+        <div className="rubro-cross-pick-chips" aria-label="Grupos en comparación">
+          {bankGroups.map((g) => (
+            <span key={`b-${g.groupKey}`} className="rubro-cross-pick-chip rubro-cross-pick-chip--bank">
+              <span className="rubro-cross-pick-chip-label">Banco · {g.rubro}</span>
+              <button
+                type="button"
+                className="rubro-cross-pick-chip-remove"
+                aria-label={`Quitar ${g.rubro} del lado banco`}
+                onClick={() => onRemoveBankKey(g.groupKey)}
+              >
+                ×
+              </button>
+            </span>
+          ))}
+          {companyGroups.map((g) => (
+            <span key={`c-${g.groupKey}`} className="rubro-cross-pick-chip rubro-cross-pick-chip--company">
+              <span className="rubro-cross-pick-chip-label">Empresa · {g.rubro}</span>
+              <button
+                type="button"
+                className="rubro-cross-pick-chip-remove"
+                aria-label={`Quitar ${g.rubro} del lado empresa`}
+                onClick={() => onRemoveCompanyKey(g.groupKey)}
+              >
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
       {!bothSides ? (
         <p className="rubro-cross-pick-hint rubro-cross-preview-hint">
           {hasBank
-            ? 'Elegí también un grupo de empresa arriba para ver el Δ entre sumas y vincular pendientes.'
-            : 'Elegí también un grupo de banco arriba para ver el Δ entre sumas y vincular pendientes.'}
+            ? 'Elegí también uno o más grupos de empresa en la tabla para ver el Δ entre sumas y vincular pendientes.'
+            : 'Elegí también uno o más grupos de banco en la tabla para ver el Δ entre sumas y vincular pendientes.'}
         </p>
       ) : null}
 
       <div className="rubro-cross-metrics">
-        {hasBank && bankGroup ? (
+        {hasBank ? (
           <div className="rubro-cross-metric">
             <span className="rubro-cross-metric-label">Σ Banco</span>
-            <strong>{formatAmount(bankGroup.bankSum)}</strong>
+            <strong>{formatAmount(metrics.bankSum)}</strong>
             <span className="rubro-cross-metric-sub">
-              {bankGroup.bankCount} mov. · {bankGroup.rubro}
+              {metrics.bankCount} mov. · {bankGroups.length} grupo{bankGroups.length === 1 ? '' : 's'}
             </span>
           </div>
         ) : null}
-        {hasCompany && companyGroup ? (
+        {hasCompany ? (
           <div className="rubro-cross-metric">
             <span className="rubro-cross-metric-label">Σ Empresa</span>
-            <strong>{formatAmount(companyGroup.companySum)}</strong>
+            <strong>{formatAmount(metrics.companySum)}</strong>
             <span className="rubro-cross-metric-sub">
-              {companyGroup.companyCount} mov. · {companyGroup.rubro}
+              {metrics.companyCount} mov. · {companyGroups.length} grupo
+              {companyGroups.length === 1 ? '' : 's'}
             </span>
           </div>
         ) : null}
-        {comparison ? (
+        {bothSides ? (
           <div className="rubro-cross-metric rubro-cross-metric--delta">
             <span className="rubro-cross-metric-label">Δ (empresa − banco)</span>
-            <strong>{formatAmount(comparison.delta)}</strong>
-            {comparison.squared ? (
+            <strong>{formatAmount(metrics.delta)}</strong>
+            {metrics.squared ? (
               <span className="compare-badge compare-badge--estado rubro-badge--ok">Cuadrado</span>
             ) : (
               <span className="compare-badge compare-badge--estado rubro-badge--warn">Revisar</span>
@@ -235,71 +325,158 @@ function CrossGroupComparePanel({
         ) : null}
       </div>
 
+      {!classificationReadOnly && classifyCount > 0 ? (
+        <div className="rubro-cross-classify-bar">
+          <p className="rubro-cross-classify-caption" id="rubro-cross-classify-caption">
+            Clasificación (misma en banco y empresa)
+          </p>
+          <div className="rubro-cross-classify-row">
+            <div className="clasif-field-wrap rubro-cross-classify-field">
+              <ClassificationComboControlled
+                text={classifyDraft}
+                onTextChange={setClassifyDraft}
+                suggestions={classificationSuggestions}
+                disabled={classifyLoading}
+                placeholder="Ej.: Comisiones"
+                ariaLabel="Clasificación para la selección"
+                inputId="rubro-cross-classify-input"
+              />
+            </div>
+            <button
+              type="button"
+              className="btn-secondary rubro-cross-classify-btn"
+              disabled={classifyLoading}
+              aria-describedby="rubro-cross-classify-caption"
+              onClick={() => void applyBulkClassification()}
+            >
+              {classifyLoading
+                ? 'Aplicando…'
+                : `Aplicar a ${classifyCount} mov.${classifyCount === 1 ? '' : 's'}`}
+            </button>
+          </div>
+          {classifyError ? <p className="msg err rubro-cross-classify-err">{classifyError}</p> : null}
+        </div>
+      ) : null}
+
       <div className={`rubro-detail-grid ${bothSides ? '' : 'rubro-detail-grid--single'}`}>
-        {hasBank && bankGroup ? (
+        {hasBank ? (
           <MovementMiniTable
-            title="Detalle banco (grupo elegido)"
-            items={bankGroup.bankItems}
+            title={`Detalle banco (${bankGroups.length} grupo${bankGroups.length === 1 ? '' : 's'})`}
+            items={bankItems}
             linkMode={linkMode}
             selectedTxId={selectedBankId}
-            onToggleTxId={
-              linkMode ? (id) => setSelectedBankId((prev) => (prev === id ? null : id)) : undefined
-            }
+            onToggleTxId={linkMode ? toggleBank : undefined}
             onViewPair={onViewPair}
           />
         ) : null}
-        {hasCompany && companyGroup ? (
+        {hasCompany ? (
           <MovementMiniTable
-            title="Detalle empresa (grupo elegido)"
-            items={companyGroup.companyItems}
+            title={`Detalle empresa (${companyGroups.length} grupo${companyGroups.length === 1 ? '' : 's'})`}
+            items={companyItems}
             linkMode={linkMode}
             selectedTxId={selectedCompanyId}
-            onToggleTxId={
-              linkMode
-                ? (id) => setSelectedCompanyId((prev) => (prev === id ? null : id))
-                : undefined
-            }
+            onToggleTxId={linkMode ? toggleCompany : undefined}
             onViewPair={onViewPair}
           />
         ) : null}
       </div>
 
-      {linkMode ? (
-        <div className="rubro-cross-link-bar">
-          <p className="rubro-cross-link-summary">
-            {selectedBankId != null && selectedCompanyId != null ? (
-              <>
-                Vincular banco <strong>ID {selectedBankId}</strong> con empresa{' '}
-                <strong>ID {selectedCompanyId}</strong>
-                {linkableBank.length > 1 || linkableCompany.length > 1
-                  ? ' (elegiste un par entre los pendientes del grupo)'
-                  : null}
-              </>
-            ) : (
-              <>Elegí un movimiento pendiente de cada lado en las tablas de arriba.</>
-            )}
-          </p>
-          <button
-            type="button"
-            className="btn-import rubro-cross-link-btn"
-            disabled={!canLink || linkLoading}
-            onClick={() => {
-              if (selectedBankId != null && selectedCompanyId != null) {
-                onManualPair!(selectedBankId, selectedCompanyId)
-              }
-            }}
-          >
-            {linkLoading ? 'Vinculando…' : 'Vincular selección'}
-          </button>
-          {linkError ? <p className="msg err rubro-cross-link-err">{linkError}</p> : null}
-        </div>
+      {linkPrompt && onManualPair ? (
+        <RubroLinkConfirmModal
+          prompt={linkPrompt}
+          loading={linkLoading}
+          error={linkError}
+          onCancel={dismissLinkPrompt}
+          onConfirm={() => onManualPair(linkPrompt.bankId, linkPrompt.companyId)}
+        />
       ) : null}
-
-      <p className="hint rubro-cross-foot">
-        Cuadrado si |Δ| ≤ {tolLabel}. El vínculo manual es entre dos movimientos pendientes (uno de cada lado);
-        los que ya tienen «par» no se pueden elegir.
-      </p>
     </section>
+  )
+}
+
+function RubroExpandedGroupDetail({
+  group,
+  reconcileLocked,
+  manualLinkLoading,
+  manualLinkError,
+  onManualPair,
+  onViewPair,
+}: {
+  group: RubroGroupRow
+  reconcileLocked: boolean
+  manualLinkLoading: boolean
+  manualLinkError: string | null
+  onManualPair?: (bankId: number, companyId: number) => void
+  onViewPair?: (pairId: number) => void
+}) {
+  const linkableBank = useMemo(
+    () => group.bankItems.filter((i) => i.pairId == null),
+    [group.bankItems],
+  )
+  const linkableCompany = useMemo(
+    () => group.companyItems.filter((i) => i.pairId == null),
+    [group.companyItems],
+  )
+
+  const linkMode =
+    !reconcileLocked &&
+    onManualPair != null &&
+    linkableBank.length > 0 &&
+    linkableCompany.length > 0
+
+  const linkPickerResetKey = useMemo(
+    () =>
+      [group.groupKey, ...linkableBank.map((i) => i.m.id), ...linkableCompany.map((i) => i.m.id)].join(
+        '|',
+      ),
+    [group.groupKey, linkableBank, linkableCompany],
+  )
+
+  const {
+    selectedBankId,
+    selectedCompanyId,
+    toggleBank,
+    toggleCompany,
+    prompt: linkPrompt,
+    dismissPrompt: dismissLinkPrompt,
+  } = usePendingPairLinkPicker(linkMode, linkableBank, linkableCompany, linkPickerResetKey)
+
+  return (
+    <div className="rubro-expanded-group-detail">
+      {linkMode ? (
+        <p className="rubro-detail-link-hint rubro-expanded-link-hint">
+          Tocá <strong>pend.</strong> en banco y empresa; al elegir el segundo se abre la confirmación
+          para vincular.
+        </p>
+      ) : null}
+      <div className="rubro-detail-grid">
+        <MovementMiniTable
+          title="Movimientos banco"
+          items={group.bankItems}
+          linkMode={linkMode}
+          selectedTxId={selectedBankId}
+          onToggleTxId={linkMode ? toggleBank : undefined}
+          onViewPair={onViewPair}
+        />
+        <MovementMiniTable
+          title="Movimientos empresa"
+          items={group.companyItems}
+          linkMode={linkMode}
+          selectedTxId={selectedCompanyId}
+          onToggleTxId={linkMode ? toggleCompany : undefined}
+          onViewPair={onViewPair}
+        />
+      </div>
+      {linkPrompt && onManualPair ? (
+        <RubroLinkConfirmModal
+          prompt={linkPrompt}
+          loading={manualLinkLoading}
+          error={manualLinkError}
+          onCancel={dismissLinkPrompt}
+          onConfirm={() => onManualPair(linkPrompt.bankId, linkPrompt.companyId)}
+        />
+      ) : null}
+    </div>
   )
 }
 
@@ -309,24 +486,39 @@ export function RubroGroupsView({
   reconcileLocked,
   manualLinkLoading,
   manualLinkError,
+  classificationReadOnly,
+  classificationSuggestions,
+  onSetClassification,
+  onSetPairClassification,
   onManualPair,
   onScrollToComparisonRow,
+  onUnlinkPair,
 }: {
   detail: SessionDetail
   sessionAmountTolerance: number | null | undefined
   reconcileLocked: boolean
   manualLinkLoading: boolean
   manualLinkError: string | null
+  classificationReadOnly: boolean
+  classificationSuggestions: readonly string[]
+  onSetClassification: (side: 'bank' | 'company', txId: number, classification: string) => void | Promise<void>
+  onSetPairClassification: (pairId: number, classification: string) => void | Promise<void>
   onManualPair?: (bankId: number, companyId: number) => void
   onScrollToComparisonRow?: (rowKey: string) => void
+  onUnlinkPair?: (
+    pairId: number,
+    matchSource: 'MANUAL' | 'AUTO',
+  ) => void | boolean | Promise<void | boolean>
 }) {
   const [groupMode, setGroupMode] = useState<RubroGroupMode>('specification')
   const [viewPairId, setViewPairId] = useState<number | null>(null)
   const [expandedKey, setExpandedKey] = useState<string | null>(null)
   const [hideEmpty, setHideEmpty] = useState(false)
   const [onlyMismatch, setOnlyMismatch] = useState(false)
-  const [pickBankKey, setPickBankKey] = useState<string>('')
-  const [pickCompanyKey, setPickCompanyKey] = useState<string>('')
+  const [pickBankKeys, setPickBankKeys] = useState<Set<string>>(() => new Set())
+  const [pickCompanyKeys, setPickCompanyKeys] = useState<Set<string>>(() => new Set())
+  const [classifyLoading, setClassifyLoading] = useState(false)
+  const [classifyError, setClassifyError] = useState<string | null>(null)
 
   const groups = useMemo(
     () => buildRubroGroups(detail, sessionAmountTolerance, groupMode),
@@ -335,36 +527,41 @@ export function RubroGroupsView({
 
   const groupsByKey = useMemo(() => new Map(groups.map((g) => [g.groupKey, g])), [groups])
 
-  const bankGroupOptions = useMemo(
-    () => groups.filter((g) => g.bankCount > 0),
-    [groups],
+  const pickedBankGroups = useMemo(
+    () =>
+      [...pickBankKeys]
+        .map((k) => groupsByKey.get(k))
+        .filter((g): g is RubroGroupRow => g != null),
+    [pickBankKeys, groupsByKey],
   )
-  const companyGroupOptions = useMemo(
-    () => groups.filter((g) => g.companyCount > 0),
-    [groups],
+  const pickedCompanyGroups = useMemo(
+    () =>
+      [...pickCompanyKeys]
+        .map((k) => groupsByKey.get(k))
+        .filter((g): g is RubroGroupRow => g != null),
+    [pickCompanyKeys, groupsByKey],
   )
-
-  const pickedBank = pickBankKey ? groupsByKey.get(pickBankKey) : undefined
-  const pickedCompany = pickCompanyKey ? groupsByKey.get(pickCompanyKey) : undefined
 
   useEffect(() => {
     setExpandedKey(null)
-    setPickBankKey('')
-    setPickCompanyKey('')
+    setPickBankKeys(new Set())
+    setPickCompanyKeys(new Set())
+    setClassifyError(null)
   }, [groupMode])
 
   useEffect(() => {
-    if (pickBankKey && !groupsByKey.has(pickBankKey)) setPickBankKey('')
-  }, [pickBankKey, groupsByKey])
+    setPickBankKeys((prev) => {
+      const next = new Set([...prev].filter((k) => groupsByKey.has(k)))
+      return next.size === prev.size ? prev : next
+    })
+  }, [groupsByKey])
 
   useEffect(() => {
-    if (pickCompanyKey && !groupsByKey.has(pickCompanyKey)) setPickCompanyKey('')
-  }, [pickCompanyKey, groupsByKey])
-
-  const tolLabel =
-    sessionAmountTolerance !== undefined && sessionAmountTolerance !== null
-      ? formatToleranceInputDisplay(Number(sessionAmountTolerance))
-      : '0,02'
+    setPickCompanyKeys((prev) => {
+      const next = new Set([...prev].filter((k) => groupsByKey.has(k)))
+      return next.size === prev.size ? prev : next
+    })
+  }, [groupsByKey])
 
   const emptyLabel = groupMode === 'classification' ? SIN_RUBRO_LABEL : SIN_DETALLE_LABEL
   const groupColumnTitle = groupMode === 'classification' ? 'Rubro (clasif.)' : 'Detalle / referencia'
@@ -385,8 +582,50 @@ export function RubroGroupsView({
   )
 
   function clearCrossPick() {
-    setPickBankKey('')
-    setPickCompanyKey('')
+    setPickBankKeys(new Set())
+    setPickCompanyKeys(new Set())
+    setClassifyError(null)
+  }
+
+  function toggleBankKey(groupKey: string) {
+    setPickBankKeys((prev) => {
+      const next = new Set(prev)
+      if (next.has(groupKey)) next.delete(groupKey)
+      else next.add(groupKey)
+      return next
+    })
+  }
+
+  function toggleCompanyKey(groupKey: string) {
+    setPickCompanyKeys((prev) => {
+      const next = new Set(prev)
+      if (next.has(groupKey)) next.delete(groupKey)
+      else next.add(groupKey)
+      return next
+    })
+  }
+
+  async function handleBulkClassify(classification: string) {
+    setClassifyLoading(true)
+    setClassifyError(null)
+    try {
+      const targets = collectBulkClassificationTargets(pickedBankGroups, pickedCompanyGroups)
+      const payload = classification === '' ? null : classification
+      for (const pairId of targets.pairIds) {
+        await onSetPairClassification(pairId, payload ?? '')
+      }
+      for (const txId of targets.bankPendingIds) {
+        await onSetClassification('bank', txId, payload ?? '')
+      }
+      for (const txId of targets.companyPendingIds) {
+        await onSetClassification('company', txId, payload ?? '')
+      }
+    } catch (e) {
+      setClassifyError(e instanceof Error ? e.message : String(e))
+      throw e
+    } finally {
+      setClassifyLoading(false)
+    }
   }
 
   const handleViewPair = (pairId: number) => setViewPairId(pairId)
@@ -414,111 +653,24 @@ export function RubroGroupsView({
         </button>
       </div>
 
-      <p className="hint rubro-view-mode-hint">
-        {groupMode === 'specification' ? (
-          <>
-            Agrupa automáticamente cuando la <strong>descripción</strong> (o la referencia si no hay
-            descripción) es la misma en extracto y libro. Si los textos no coinciden, elegí un grupo de
-            banco y otro de empresa con <strong>Comparar cruzado</strong> (abajo en la tabla o en el
-            panel).
-          </>
-        ) : (
-          <>
-            Agrupa por <strong>Clasif.</strong> Cuando el rubro no alcanza, compará libremente un grupo
-            banco con un grupo empresa distintos.
-          </>
-        )}
-      </p>
-
-      <div className="rubro-cross-pick" role="group" aria-label="Elegir grupos para comparar">
-        <div className="rubro-cross-pick-header">
-          <div className="rubro-cross-pick-heading">
-            <span className="rubro-cross-pick-kicker">Comparación manual</span>
-            <span className="rubro-cross-pick-title">Comparar cruzado</span>
-          </div>
-          {(pickBankKey || pickCompanyKey) && (
-            <button
-              type="button"
-              className="btn-secondary rubro-cross-pick-clear"
-              onClick={clearCrossPick}
-            >
-              Limpiar selección
-            </button>
-          )}
-        </div>
-        <div className="rubro-cross-pick-grid">
-          <label className="rubro-cross-pick-field rubro-cross-pick-field--bank">
-            <span className="rubro-cross-pick-label">
-              <span className="rubro-cross-pick-side" aria-hidden>
-                Banco
-              </span>
-              Grupo del extracto
-            </span>
-            <span className="rubro-cross-pick-select-wrap">
-              <select
-                className={
-                  pickBankKey
-                    ? 'rubro-cross-pick-select rubro-cross-pick-select--filled'
-                    : 'rubro-cross-pick-select'
-                }
-                value={pickBankKey}
-                onChange={(ev) => setPickBankKey(ev.target.value)}
-                aria-label="Grupo banco a comparar"
-              >
-                <option value="">Elegí un grupo de banco…</option>
-                {bankGroupOptions.map((g) => (
-                  <option key={g.groupKey} value={g.groupKey}>
-                    {g.rubro} · {g.bankCount} mov. · Σ {formatAmount(g.bankSum)}
-                  </option>
-                ))}
-              </select>
-            </span>
-          </label>
-          <span className="rubro-cross-pick-vs" aria-hidden title="Comparar con">
-            ↔
-          </span>
-          <label className="rubro-cross-pick-field rubro-cross-pick-field--company">
-            <span className="rubro-cross-pick-label">
-              <span className="rubro-cross-pick-side" aria-hidden>
-                Empresa
-              </span>
-              Grupo del libro
-            </span>
-            <span className="rubro-cross-pick-select-wrap">
-              <select
-                className={
-                  pickCompanyKey
-                    ? 'rubro-cross-pick-select rubro-cross-pick-select--filled'
-                    : 'rubro-cross-pick-select'
-                }
-                value={pickCompanyKey}
-                onChange={(ev) => setPickCompanyKey(ev.target.value)}
-                aria-label="Grupo empresa a comparar"
-              >
-                <option value="">Elegí un grupo de empresa…</option>
-                {companyGroupOptions.map((g) => (
-                  <option key={g.groupKey} value={g.groupKey}>
-                    {g.rubro} · {g.companyCount} mov. · Σ {formatAmount(g.companySum)}
-                  </option>
-                ))}
-              </select>
-            </span>
-          </label>
-        </div>
-      </div>
-
-      {pickedBank || pickedCompany ? (
+      {pickedBankGroups.length > 0 || pickedCompanyGroups.length > 0 ? (
         <CrossGroupComparePanel
-          bankGroup={pickedBank}
-          companyGroup={pickedCompany}
+          bankGroups={pickedBankGroups}
+          companyGroups={pickedCompanyGroups}
           sessionAmountTolerance={sessionAmountTolerance}
-          tolLabel={tolLabel}
           reconcileLocked={reconcileLocked}
+          classificationReadOnly={classificationReadOnly}
+          classificationSuggestions={classificationSuggestions}
           linkLoading={manualLinkLoading}
           linkError={manualLinkError}
+          classifyLoading={classifyLoading}
+          classifyError={classifyError}
           onClear={clearCrossPick}
           onManualPair={onManualPair}
           onViewPair={handleViewPair}
+          onBulkClassify={handleBulkClassify}
+          onRemoveBankKey={toggleBankKey}
+          onRemoveCompanyKey={toggleCompanyKey}
         />
       ) : null}
 
@@ -588,8 +740,8 @@ export function RubroGroupsView({
             ) : (
               filtered.map((g) => {
                 const open = expandedKey === g.groupKey
-                const bankPicked = pickBankKey === g.groupKey
-                const companyPicked = pickCompanyKey === g.groupKey
+                const bankPicked = pickBankKeys.has(g.groupKey)
+                const companyPicked = pickCompanyKeys.has(g.groupKey)
                 const rowClassName = [
                   'rubro-summary-row',
                   g.isSinRubro ? 'rubro-summary-row--sin' : '',
@@ -648,8 +800,8 @@ export function RubroGroupsView({
                                   ? 'rubro-pick-btn rubro-pick-btn--bank rubro-pick-btn--active'
                                   : 'rubro-pick-btn rubro-pick-btn--bank'
                               }
-                              onClick={() => setPickBankKey(g.groupKey)}
-                              title="Usar este grupo como lado banco en la comparación cruzada"
+                              onClick={() => toggleBankKey(g.groupKey)}
+                              title="Agregar o quitar este grupo del lado banco en la comparación"
                               aria-pressed={bankPicked}
                             >
                               Banco
@@ -663,8 +815,8 @@ export function RubroGroupsView({
                                   ? 'rubro-pick-btn rubro-pick-btn--company rubro-pick-btn--active'
                                   : 'rubro-pick-btn rubro-pick-btn--company'
                               }
-                              onClick={() => setPickCompanyKey(g.groupKey)}
-                              title="Usar este grupo como lado empresa en la comparación cruzada"
+                              onClick={() => toggleCompanyKey(g.groupKey)}
+                              title="Agregar o quitar este grupo del lado empresa en la comparación"
                               aria-pressed={companyPicked}
                             >
                               Empresa
@@ -676,18 +828,14 @@ export function RubroGroupsView({
                     {open ? (
                       <tr className="rubro-detail-row">
                         <td colSpan={9}>
-                          <div className="rubro-detail-grid">
-                            <MovementMiniTable
-                              title="Movimientos banco"
-                              items={g.bankItems}
-                              onViewPair={handleViewPair}
-                            />
-                            <MovementMiniTable
-                              title="Movimientos empresa"
-                              items={g.companyItems}
-                              onViewPair={handleViewPair}
-                            />
-                          </div>
+                          <RubroExpandedGroupDetail
+                            group={g}
+                            reconcileLocked={reconcileLocked}
+                            manualLinkLoading={manualLinkLoading}
+                            manualLinkError={manualLinkError}
+                            onManualPair={onManualPair}
+                            onViewPair={handleViewPair}
+                          />
                         </td>
                       </tr>
                     ) : null}
@@ -699,16 +847,13 @@ export function RubroGroupsView({
         </table>
       </div>
 
-      <p className="hint rubro-view-foot">
-        Δ en la tabla = mismo grupo (misma fila). En movimientos ya emparejados, tocá <strong>par</strong>{' '}
-        para ver el otro lado. Comparación cruzada: elegís grupos distintos y podés vincular pendientes.
-      </p>
-
       {pairPreview ? (
         <PairPreviewModal
           data={pairPreview}
           onClose={() => setViewPairId(null)}
           onScrollToRow={onScrollToComparisonRow}
+          canUnlink={onUnlinkPair != null}
+          onUnlinkPair={onUnlinkPair}
         />
       ) : null}
     </div>

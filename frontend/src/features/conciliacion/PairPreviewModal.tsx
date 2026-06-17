@@ -3,6 +3,7 @@ import type { PairPreviewData } from './utils/pairLookup'
 import { comparisonPairRowKey } from './utils/pairLookup'
 import { movementSummaryLine } from './utils/counterpartUtils'
 import { formatAmount, formatDisplayDate } from './utils/format'
+import { UnlinkPairButton } from './UnlinkPairButton'
 
 function MovementCard({ title, m }: { title: string; m: PairPreviewData['bank'] }) {
   return (
@@ -34,13 +35,21 @@ export function PairPreviewModal({
   data,
   onClose,
   onScrollToRow,
+  canUnlink = false,
+  onUnlinkPair,
 }: {
   data: PairPreviewData
   onClose: () => void
   onScrollToRow?: (rowKey: string) => void
+  canUnlink?: boolean
+  onUnlinkPair?: (
+    pairId: number,
+    matchSource: 'MANUAL' | 'AUTO',
+  ) => void | boolean | Promise<void | boolean>
 }) {
   const { pair, bank, company, delta } = data
   const sourceLabel = pair.matchSource === 'MANUAL' ? 'Manual' : 'Automático'
+  const matchSource = pair.matchSource === 'MANUAL' ? 'MANUAL' : 'AUTO'
 
   useEffect(() => {
     function onKey(ev: KeyboardEvent) {
@@ -49,6 +58,12 @@ export function PairPreviewModal({
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
+
+  async function handleUnlink() {
+    if (!onUnlinkPair) return
+    const result = await onUnlinkPair(pair.pairId, matchSource)
+    if (result !== false) onClose()
+  }
 
   return (
     <div className="comment-modal-backdrop counterpart-backdrop" role="presentation" onClick={onClose}>
@@ -83,6 +98,12 @@ export function PairPreviewModal({
           {Math.abs(delta) < 1e-9 ? ' · importes iguales' : null}
         </p>
         <footer className="counterpart-modal-actions">
+          {canUnlink && onUnlinkPair ? (
+            <UnlinkPairButton
+              matchSource={matchSource}
+              onClick={() => void handleUnlink()}
+            />
+          ) : null}
           {onScrollToRow ? (
             <button
               type="button"

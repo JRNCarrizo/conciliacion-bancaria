@@ -113,12 +113,14 @@ export function SessionDisplayNameEditor({
   sessionId,
   createdAt,
   displayName,
+  status,
   readOnly,
   onSaved,
 }: {
   sessionId: number
   createdAt: string
   displayName: string | null | undefined
+  status?: string
   readOnly: boolean
   onSaved: (displayName: string | null) => void
 }) {
@@ -188,8 +190,14 @@ export function SessionDisplayNameEditor({
         </div>
       ) : (
         <div className="session-display-name-view">
-          <p className="session-display-name-kicker">Nombre de la sesión</p>
-          <h3 className="session-detail-title">{title}</h3>
+          <div className="session-display-name-title-row">
+            <h3 className="session-detail-title">{title}</h3>
+            {status ? (
+              <span className={`session-status-pill session-status-pill--${status.toLowerCase()}`}>
+                {sessionStatusLabel(status)}
+              </span>
+            ) : null}
+          </div>
           <p className="session-detail-subtitle">{subtitle}</p>
           {!readOnly ? (
             <button

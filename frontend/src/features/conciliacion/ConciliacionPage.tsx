@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams, useLocation } from 'react-router-dom'
 import './conciliacion.css'
 import {
@@ -51,7 +51,6 @@ import {
   formatPct,
   formatSessionListWhen,
   formatToleranceInputDisplay,
-  sessionStatusLabel,
   statusPanelClass,
 } from './utils/format'
 import { parseBalanceInput, parseTransactionId } from './utils/parse'
@@ -61,6 +60,8 @@ import {
   normalizeColumnLettersInput,
 } from './utils/importLayoutExcel'
 import { CounterpartPreviewModal } from './CounterpartPreviewModal'
+import { ManualLinkPreview } from './ManualLinkPreview'
+import { ClassificationCombo } from './ClassificationCombo'
 import { RubroGroupsView } from './RubroGroupsView'
 import {
   findDuplicateSiblings,
@@ -76,6 +77,7 @@ import { UnlinkPairButton } from './UnlinkPairButton'
 import {
   buildShareRefFromComparisonRow,
   parseFocusFromSearchParam,
+  parseSessionIdFromSearchParam,
   shareRefToRowKey,
   type ConciliacionFocusNavState,
 } from './utils/shareLink'
@@ -210,10 +212,36 @@ function ClassicViewHelpText() {
 function RubroViewHelpText() {
   return (
     <>
-      Compará sumas por concepto. Con <strong>Comparar cruzado</strong> elegís grupo banco y grupo
-      empresa; en el panel podés <strong>vincular</strong> dos movimientos pendientes (clic en la fila de
-      cada lado).
+      <p>
+        <strong>Mismo detalle en registro</strong> agrupa automáticamente cuando la descripción (o la
+        referencia si no hay descripción) es la misma en extracto y libro.{' '}
+        <strong>Por clasificación (rubro)</strong> agrupa por el rubro asignado a cada movimiento.
+      </p>
+      <p>
+        Si los textos no coinciden, usá la columna <strong>Comparar</strong>: cada clic en{' '}
+        <strong>Banco</strong> o <strong>Empresa</strong> agrega o quita ese grupo del panel de
+        comparación cruzada (podés elegir varios de cada lado). Ahí ves Σ y Δ, podés{' '}
+        <strong>clasificar</strong> todos los movimientos seleccionados con un solo rubro y{' '}
+        <strong>vincular</strong> pendientes (clic en la fila de cada lado).
+      </p>
+      <p>
+        Δ en la tabla = mismo grupo (misma fila). Cuadrado si |Δ| ≤ tolerancia de importe. En
+        movimientos ya emparejados, tocá <strong>par</strong> para ver el otro lado.
+      </p>
     </>
+  )
+}
+
+function ManualLinkHelpText() {
+  return (
+    <p>
+      En comparativa o vista completa, hacé clic en <strong>Posible match</strong> o{' '}
+      <strong>Duplicado</strong> para ver el detalle al lado y vincular desde ahí. También podés copiar
+      los <strong>ID</strong> de la tabla (solo dígitos). Ambos movimientos deben seguir{' '}
+      <strong>pendientes</strong>. Los vínculos manuales no se borran al conciliar en automático. En
+      pares automáticos podés usar <strong>Desvincular</strong> para devolverlos a pendientes sin
+      re-conciliar toda la sesión.
+    </p>
   )
 }
 
@@ -496,27 +524,6 @@ function ExecutiveSummaryPanel({
   )
 }
 
-function PendingGuide() {
-  return (
-    <details className="pending-guide">
-      <summary className="pending-guide-summary">Guía: qué implican los pendientes</summary>
-      <div className="pending-guide-body">
-        <p>
-          <strong>Pendiente banco</strong> — figura en el extracto pero no en el libro: suele ser
-          débitos automáticos, comisiones o impuestos bancarios. Indica que el banco registró algo
-          que la empresa aún no cargó: en general hay que <strong>dar de alta</strong> esos
-          movimientos en el sistema.
-        </p>
-        <p>
-          <strong>Pendiente empresa</strong> — está en el libro pero no en el banco: por ejemplo
-          cheques emitidos no cobrados, transferencias en tránsito o depósitos recientes. Suele
-          requerir <strong>esperar la compensación</strong> en cuenta o verificar con el banco.
-        </p>
-      </div>
-    </details>
-  )
-}
-
 /** Estado del par según importes de la fila y tolerancia guardada (incluye 0). No usar solo pair.pairKind. */
 function pairKindForComparisonRow(
   row: ComparisonRow,
@@ -570,6 +577,47 @@ function pairEstadoMeta(
   }
 }
 
+type BalancesLoadStatus = 'empty' | 'partial' | 'ready'
+
+function balancesLoadStatus(session: SessionDetail['session']): BalancesLoadStatus {
+  const filled = [
+    session.openingBankBalance,
+    session.closingBankBalance,
+    session.openingCompanyBalance,
+    session.closingCompanyBalance,
+  ].filter((v) => v != null).length
+  if (filled === 0) return 'empty'
+  if (session.closingBankBalance != null && session.closingCompanyBalance != null) return 'ready'
+  return 'partial'
+}
+
+const BALANCES_STATUS_LABEL: Record<BalancesLoadStatus, string> = {
+  empty: 'Opcional',
+  partial: 'En progreso',
+  ready: 'Cierre listo',
+}
+
+function balancesTabDetail(session: SessionDetail['session']): string {
+  const filled = [
+    session.openingBankBalance,
+    session.closingBankBalance,
+    session.openingCompanyBalance,
+    session.closingCompanyBalance,
+  ].filter((v) => v != null).length
+  if (filled === 0) {
+    return 'Completá los saldos para cerrar la auditoría del período'
+  }
+  const parts: string[] = []
+  if (session.closingBankBalance != null) {
+    parts.push(`Banco final ${formatAmount(session.closingBankBalance)}`)
+  }
+  if (session.closingCompanyBalance != null) {
+    parts.push(`Empresa final ${formatAmount(session.closingCompanyBalance)}`)
+  }
+  if (parts.length > 0) return parts.join(' · ')
+  return `${filled} de 4 saldos cargados`
+}
+
 function SessionBalancesForm({
   session,
   onSaved,
@@ -580,6 +628,7 @@ function SessionBalancesForm({
   /** Sesión cerrada: solo lectura (valores guardados). */
   readOnly: boolean
 }) {
+  const [expanded, setExpanded] = useState(false)
   const [openingBankBalance, setOpeningBankBalance] = useState('')
   const [closingBankBalance, setClosingBankBalance] = useState('')
   const [openingCompanyBalance, setOpeningCompanyBalance] = useState('')
@@ -605,6 +654,7 @@ function SessionBalancesForm({
       session.closingCompanyBalance != null ? String(session.closingCompanyBalance) : '',
     )
     setErr(null)
+    setExpanded(false)
   }, [session.id, readOnly])
 
   async function handleSubmit(e: React.FormEvent) {
@@ -632,79 +682,122 @@ function SessionBalancesForm({
     }
   }
 
+  const loadStatus = balancesLoadStatus(session)
+  const tabDetail = balancesTabDetail(session)
+
   return (
-    <form
-      className={['balances-form', readOnly && 'balances-form--locked'].filter(Boolean).join(' ')}
-      onSubmit={(e) => void handleSubmit(e)}
+    <section
+      className={
+        expanded
+          ? 'balances-disclosure balances-disclosure--open'
+          : 'balances-disclosure balances-disclosure--collapsed'
+      }
+      aria-labelledby="session-balances-title"
     >
-      <h3 className="subsection-title">Saldos del período (opcional)</h3>
-      {readOnly ? (
-        <p className="hint balances-locked-hint">
-          <strong>Conciliación cerrada:</strong> saldos y clasificación de pendientes en solo lectura.
-        </p>
-      ) : (
-        <p className="hint">
-          Podés modificar los importes en cualquier momento y <strong>Guardar saldos</strong> para
-          persistirlos. Miles con punto (27.000.000) o coma decimal (1.234,56). Con{' '}
-          <strong>saldo final banco</strong> y <strong>saldo final empresa</strong> el resumen cierra
-          la auditoría de cierre.
-        </p>
-      )}
-      <div className="balances-grid">
-        <label>
-          <span>Saldo inicial banco</span>
-          <input
-            type="text"
-            inputMode="decimal"
-            readOnly={readOnly}
-            value={openingBankBalance}
-            onChange={(ev) => setOpeningBankBalance(ev.target.value)}
-            autoComplete="off"
-          />
-        </label>
-        <label>
-          <span>Saldo final banco</span>
-          <input
-            type="text"
-            inputMode="decimal"
-            readOnly={readOnly}
-            value={closingBankBalance}
-            onChange={(ev) => setClosingBankBalance(ev.target.value)}
-            autoComplete="off"
-          />
-        </label>
-        <label>
-          <span>Saldo inicial empresa</span>
-          <input
-            type="text"
-            inputMode="decimal"
-            readOnly={readOnly}
-            value={openingCompanyBalance}
-            onChange={(ev) => setOpeningCompanyBalance(ev.target.value)}
-            autoComplete="off"
-          />
-        </label>
-        <label>
-          <span>Saldo final empresa</span>
-          <input
-            type="text"
-            inputMode="decimal"
-            readOnly={readOnly}
-            value={closingCompanyBalance}
-            onChange={(ev) => setClosingCompanyBalance(ev.target.value)}
-            autoComplete="off"
-          />
-        </label>
-      </div>
-      {!readOnly && (
-        <div className="balances-actions-row">
-          <button type="submit" className="btn-secondary" disabled={saving}>
-            {saving ? 'Guardando…' : 'Guardar saldos'}
-          </button>
+      <button
+        type="button"
+        id="session-balances-title"
+        aria-expanded={expanded}
+        className="balances-disclosure-summary"
+        onClick={() => setExpanded((open) => !open)}
+      >
+        <span className="balances-disclosure-title">Saldos del período</span>
+        <span className={`balances-disclosure-badge balances-disclosure-badge--${loadStatus}`}>
+          {BALANCES_STATUS_LABEL[loadStatus]}
+        </span>
+        <span className="balances-disclosure-meta">{tabDetail}</span>
+      </button>
+
+      {expanded && (
+        <div className="balances-disclosure-body">
+          <form
+            className={['balances-form', readOnly && 'balances-form--locked'].filter(Boolean).join(' ')}
+            onSubmit={(e) => void handleSubmit(e)}
+          >
+            {readOnly ? (
+              <p className="hint balances-locked-hint">
+                <strong>Conciliación cerrada:</strong> saldos y clasificación de pendientes en solo lectura.
+              </p>
+            ) : (
+              <p className="hint balances-form-hint">
+                Podés modificar los importes en cualquier momento y <strong>Guardar saldos</strong> para
+                persistirlos. Miles con punto (27.000.000) o coma decimal (1.234,56). Con{' '}
+                <strong>saldo final banco</strong> y <strong>saldo final empresa</strong> el resumen cierra
+                la auditoría de cierre.
+              </p>
+            )}
+            <div className="balances-columns">
+              <div className="balances-column balances-column--bank">
+                <h4 className="balances-column-title">Banco</h4>
+                <div className="balances-grid balances-grid--column">
+                  <label>
+                    <span>Saldo inicial</span>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      readOnly={readOnly}
+                      value={openingBankBalance}
+                      onChange={(ev) => setOpeningBankBalance(ev.target.value)}
+                      autoComplete="off"
+                      placeholder="—"
+                    />
+                  </label>
+                  <label>
+                    <span>Saldo final</span>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      readOnly={readOnly}
+                      value={closingBankBalance}
+                      onChange={(ev) => setClosingBankBalance(ev.target.value)}
+                      autoComplete="off"
+                      placeholder="—"
+                    />
+                  </label>
+                </div>
+              </div>
+              <div className="balances-column balances-column--company">
+                <h4 className="balances-column-title">Empresa</h4>
+                <div className="balances-grid balances-grid--column">
+                  <label>
+                    <span>Saldo inicial</span>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      readOnly={readOnly}
+                      value={openingCompanyBalance}
+                      onChange={(ev) => setOpeningCompanyBalance(ev.target.value)}
+                      autoComplete="off"
+                      placeholder="—"
+                    />
+                  </label>
+                  <label>
+                    <span>Saldo final</span>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      readOnly={readOnly}
+                      value={closingCompanyBalance}
+                      onChange={(ev) => setClosingCompanyBalance(ev.target.value)}
+                      autoComplete="off"
+                      placeholder="—"
+                    />
+                  </label>
+                </div>
+              </div>
+            </div>
+            {!readOnly && (
+              <div className="balances-actions-row">
+                <button type="submit" className="btn-secondary" disabled={saving}>
+                  {saving ? 'Guardando…' : 'Guardar saldos'}
+                </button>
+              </div>
+            )}
+            {err && <p className="msg err">{err}</p>}
+          </form>
         </div>
       )}
-      {err && <p className="msg err">{err}</p>}
-    </form>
+    </section>
   )
 }
 
@@ -1233,71 +1326,6 @@ function ComparisonLegend({
         ))}
       </div>
     </div>
-  )
-}
-
-function ClassificationCombo({
-  value,
-  suggestions,
-  onCommit,
-  disabled,
-  ariaLabel = 'Clasificación',
-}: {
-  value: string | null | undefined
-  /** Valores ya usados en la sesión; se filtran según lo escrito. */
-  suggestions: readonly string[]
-  onCommit: (v: string) => void
-  /** Sesión cerrada u otro bloqueo: solo lectura. */
-  disabled?: boolean
-  ariaLabel?: string
-}) {
-  const listIdRaw = useId()
-  const listId = `clasif-dl-${listIdRaw.replace(/:/g, '')}`
-  const normalized = (value ?? '').trim()
-  const [text, setText] = useState(normalized)
-  useEffect(() => {
-    setText((value ?? '').trim())
-  }, [value])
-
-  const filteredOptions = useMemo(() => {
-    const pool = [...new Set(suggestions)].sort((a, b) => a.localeCompare(b, 'es'))
-    const q = text.trim().toLowerCase()
-    if (q.length === 0) {
-      return pool.slice(0, 50)
-    }
-    return pool.filter((s) => s.toLowerCase().includes(q)).slice(0, 50)
-  }, [suggestions, text])
-
-  return (
-    <>
-      <datalist id={listId}>
-        {filteredOptions.map((s) => (
-          <option key={s} value={s} />
-        ))}
-      </datalist>
-      <input
-        type="text"
-        className="clasif-input"
-        list={listId}
-        value={text}
-        disabled={disabled}
-        placeholder="Sin clasificar"
-        autoComplete="off"
-        onChange={(ev) => setText(ev.target.value)}
-        onBlur={(ev) => {
-          const t = ev.currentTarget.value.trim()
-          if (t !== normalized) {
-            onCommit(t)
-          }
-        }}
-        onKeyDown={(ev) => {
-          if (ev.key === 'Enter') {
-            ev.currentTarget.blur()
-          }
-        }}
-        aria-label={ariaLabel}
-      />
-    </>
   )
 }
 
@@ -2751,7 +2779,7 @@ function MovimientosTable({
 
 export default function ConciliacionPage() {
   const { user } = useAuth()
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const location = useLocation()
   const shareDeepLinkSetupRef = useRef<string | null>(null)
   const shareDeepLinkScrollRef = useRef<string | null>(null)
@@ -2776,7 +2804,13 @@ export default function ConciliacionPage() {
   const [sessionListPage, setSessionListPage] = useState(0)
   const [sessionListTotalPages, setSessionListTotalPages] = useState(0)
   const [sessionListTotalElements, setSessionListTotalElements] = useState(0)
-  const [selectedId, setSelectedId] = useState<number | null>(null)
+  const [selectedId, setSelectedId] = useState<number | null>(() =>
+    parseSessionIdFromSearchParam(searchParams),
+  )
+  const [historyExpanded, setHistoryExpanded] = useState(
+    () => parseSessionIdFromSearchParam(searchParams) == null,
+  )
+  const [showImportForm, setShowImportForm] = useState(false)
   const [detail, setDetail] = useState<SessionDetail | null>(null)
   const [detailError, setDetailError] = useState<string | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
@@ -2821,6 +2855,32 @@ export default function ConciliacionPage() {
 
   /** Si el GET del detalle aún no trae `amountTolerance`, usamos la del POST /conciliar reciente. */
   const [pendingSessionTolerance, setPendingSessionTolerance] = useState<number | null>(null)
+
+  const selectSession = useCallback(
+    (sessionId: number | null) => {
+      setSelectedId(sessionId)
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev)
+          if (sessionId != null) {
+            const prevSession = parseSessionIdFromSearchParam(prev)
+            next.set('sesion', String(sessionId))
+            if (prevSession !== sessionId) {
+              next.delete('focus')
+              next.delete('notas')
+            }
+          } else {
+            next.delete('sesion')
+            next.delete('focus')
+            next.delete('notas')
+          }
+          return next
+        },
+        { replace: true },
+      )
+    },
+    [setSearchParams],
+  )
 
   const effectiveSessionAmountTolerance = useMemo(() => {
     const raw = detail?.session.amountTolerance
@@ -3166,10 +3226,12 @@ export default function ConciliacionPage() {
 
   useEffect(() => {
     if (importResult?.sessionId != null) {
-      setSelectedId(importResult.sessionId)
+      selectSession(importResult.sessionId)
+      setShowImportForm(false)
+      setHistoryExpanded(false)
       void loadSessionListPage(0)
     }
-  }, [importResult, loadSessionListPage])
+  }, [importResult, loadSessionListPage, selectSession])
 
   useEffect(() => {
     if (selectedId != null) {
@@ -3299,13 +3361,13 @@ export default function ConciliacionPage() {
     await handleManualPairIds(b, c)
   }
 
-  async function handleUnlinkPair(pairId: number, matchSource: 'MANUAL' | 'AUTO') {
-    if (selectedId == null || classificationReadOnly) return
+  async function handleUnlinkPair(pairId: number, matchSource: 'MANUAL' | 'AUTO'): Promise<boolean> {
+    if (selectedId == null || classificationReadOnly) return false
     const msg =
       matchSource === 'MANUAL'
         ? '¿Quitar este vínculo manual? Los dos movimientos volverán a pendientes.'
         : '¿Desvincular este par automático? Los dos movimientos volverán a pendientes.'
-    if (!window.confirm(msg)) return
+    if (!window.confirm(msg)) return false
     const y = window.scrollY
     try {
       const r = await apiFetch(
@@ -3316,8 +3378,10 @@ export default function ConciliacionPage() {
       await loadDetail(selectedId, { soft: true })
       await loadSessionListPage(sessionListPage)
       requestAnimationFrame(() => window.scrollTo({ top: y }))
+      return true
     } catch (e) {
       setManualError(e instanceof Error ? e.message : String(e))
+      return false
     }
   }
 
@@ -3455,11 +3519,45 @@ export default function ConciliacionPage() {
   }
 
   function openSessionFromList(sessionId: number) {
-    setSelectedId(sessionId)
+    selectSession(sessionId)
+    setShowImportForm(false)
+    setHistoryExpanded(false)
     window.requestAnimationFrame(() => {
       document.getElementById('detalle-conciliacion')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
     })
   }
+
+  function startNewConciliacion() {
+    setShowImportForm(true)
+    selectSession(null)
+    setImportError(null)
+    setImportResult(null)
+    setBankFiles([])
+    setCompanyFiles([])
+    window.requestAnimationFrame(() => {
+      document.getElementById('importar-archivos')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
+  }
+
+  function closeImportForm() {
+    setShowImportForm(false)
+  }
+
+  function toggleHistoryPanel() {
+    setHistoryExpanded((expanded) => !expanded)
+  }
+
+  const selectedSessionName =
+    selectedId != null
+      ? sessions.find((s) => s.id === selectedId)?.displayName?.trim() || `Sesión #${selectedId}`
+      : null
+
+  const historySavedTabLabel =
+    sessionListTotalElements === 0
+      ? 'Sin sesiones guardadas'
+      : sessionListTotalElements === 1
+        ? '1 sesión guardada'
+        : `${sessionListTotalElements} sesiones guardadas`
 
   async function handleSetPairClassification(pairId: number, classification: string) {
     if (selectedId == null) return
@@ -3486,86 +3584,144 @@ export default function ConciliacionPage() {
   return (
     <div className="app">
       <header className="app-header">
-        <h1>Conciliación bancaria</h1>
-        <p className="subtitle">
-          Importación, sesiones, conciliación por importe (|Δ| ≤ tolerancia) y fecha más cercana
-        </p>
+        <div className="app-header-inner">
+          <div className="app-header-copy">
+            <p className="app-header-eyebrow">Herramienta contable</p>
+            <h1>Conciliación bancaria</h1>
+            <p className="subtitle">
+              Importá extractos, trabajá por sesiones y conciliá movimientos entre banco y empresa con
+              criterios configurables.
+            </p>
+          </div>
+          <ul className="app-header-highlights" aria-label="Criterios de conciliación">
+            <li className="app-header-highlight">
+              <span className="app-header-highlight-k">Importe</span>
+              <span className="app-header-highlight-v">|Δ| ≤ tolerancia</span>
+            </li>
+            <li className="app-header-highlight">
+              <span className="app-header-highlight-k">Fecha</span>
+              <span className="app-header-highlight-v">Más cercana</span>
+            </li>
+            <li className="app-header-highlight">
+              <span className="app-header-highlight-k">Sesiones</span>
+              <span className="app-header-highlight-v">Historial y export</span>
+            </li>
+          </ul>
+        </div>
       </header>
 
       <main className="app-main">
-        <section className="card card--history">
-          <div className="history-card-head">
-            <div className="history-card-head-text">
-              <h2 className="history-card-title">Sesiones de conciliación</h2>
+        <section
+          className={
+            historyExpanded
+              ? 'history-disclosure conc-panel-disclosure conc-panel-disclosure--open'
+              : 'history-disclosure conc-panel-disclosure conc-panel-disclosure--collapsed'
+          }
+          aria-labelledby="history-disclosure-title"
+        >
+          <div className="conc-panel-disclosure-toolbar">
+            <button
+              type="button"
+              id="history-disclosure-title"
+              aria-expanded={historyExpanded}
+              className="conc-panel-disclosure-summary"
+              onClick={toggleHistoryPanel}
+            >
+              <span className="conc-panel-disclosure-title">Sesiones de conciliación</span>
+              <span
+                className={
+                  sessionListTotalElements === 0
+                    ? 'conc-panel-disclosure-badge conc-panel-disclosure-badge--neutral'
+                    : 'conc-panel-disclosure-badge conc-panel-disclosure-badge--active'
+                }
+              >
+                {historySavedTabLabel}
+              </span>
+              {!historyExpanded && (
+                <span className="conc-panel-disclosure-meta">
+                  {selectedSessionName ??
+                    (sessionListTotalElements > 0
+                      ? 'Expandí para elegir o abrir una sesión'
+                      : 'Creá la primera con «Nueva conciliación»')}
+                </span>
+              )}
+            </button>
+            <div className="conc-panel-disclosure-toolbar-action">
+              <button type="button" className="btn-import" onClick={startNewConciliacion}>
+                Nueva conciliación
+              </button>
+            </div>
+          </div>
+          {historyExpanded && (
+            <div className="conc-panel-disclosure-body">
               <p className="hint history-hint">
                 Cada importación es una sesión con <strong>nombre editable</strong> (botón «Editar nombre» en el
                 detalle). Elegí <strong>Abrir</strong> para conciliar, <strong>Actividad</strong> para auditoría, o
                 exportá en Excel/PDF.
               </p>
-            </div>
-            <div className="history-card-actions">
-              <span className="history-toolbar-meta" aria-live="polite">
-                {sessionListTotalElements === 1
-                  ? '1 sesión'
-                  : `${sessionListTotalElements} sesiones`}
-              </span>
-            </div>
-          </div>
-          {sessionsError && <p className="msg err">{sessionsError}</p>}
-          {exportError && selectedId == null && (
-            <p className="msg err" role="alert">
-              {exportError}
-            </p>
-          )}
-          {sessions.length === 0 && !sessionsError && (
-            <p className="msg">No hay sesiones importadas todavía.</p>
-          )}
-          {sessions.length > 0 && (
-            <SessionHistoryList
-              sessions={sessions}
-              selectedId={selectedId}
-              exportLoading={exportLoading}
-              onOpen={openSessionFromList}
-              onActivity={(id) => void openSessionActivity(id)}
-              onExportExcel={(id) => void downloadSessionExcel(id)}
-              onExportPdf={(id) => void downloadSessionPdf(id)}
-            />
-          )}
-          {sessionListTotalPages > 1 && (
-            <div className="history-pagination">
-              <span className="history-page-info">
-                Página {sessionListPage + 1} de {sessionListTotalPages} · hasta {SESSION_HISTORY_PAGE_SIZE}{' '}
-                por página
-              </span>
-              <div className="history-pagination-actions">
-                <div className="history-pagination-actions-start">
-                  {sessionListPage > 0 && (
-                    <button
-                      type="button"
-                      className="btn-import history-pagination-nav"
-                      onClick={() => void loadSessionListPage(sessionListPage - 1)}
-                    >
-                      Anterior
-                    </button>
-                  )}
+              {sessionsError && <p className="msg err">{sessionsError}</p>}
+              {exportError && selectedId == null && (
+                <p className="msg err" role="alert">
+                  {exportError}
+                </p>
+              )}
+              {sessions.length === 0 && !sessionsError && (
+                <p className="msg">No hay sesiones importadas todavía.</p>
+              )}
+              {sessions.length > 0 && (
+                <SessionHistoryList
+                  sessions={sessions}
+                  selectedId={selectedId}
+                  exportLoading={exportLoading}
+                  onOpen={openSessionFromList}
+                  onActivity={(id) => void openSessionActivity(id)}
+                  onExportExcel={(id) => void downloadSessionExcel(id)}
+                  onExportPdf={(id) => void downloadSessionPdf(id)}
+                />
+              )}
+              {sessionListTotalPages > 1 && (
+                <div className="history-pagination">
+                  <span className="history-page-info">
+                    Página {sessionListPage + 1} de {sessionListTotalPages} · hasta {SESSION_HISTORY_PAGE_SIZE}{' '}
+                    por página
+                  </span>
+                  <div className="history-pagination-actions">
+                    <div className="history-pagination-actions-start">
+                      {sessionListPage > 0 && (
+                        <button
+                          type="button"
+                          className="btn-import history-pagination-nav"
+                          onClick={() => void loadSessionListPage(sessionListPage - 1)}
+                        >
+                          Anterior
+                        </button>
+                      )}
+                    </div>
+                    <div className="history-pagination-actions-end">
+                      <button
+                        type="button"
+                        className="btn-import history-pagination-nav"
+                        disabled={sessionListPage >= sessionListTotalPages - 1}
+                        onClick={() => void loadSessionListPage(sessionListPage + 1)}
+                      >
+                        Siguiente
+                      </button>
+                    </div>
+                  </div>
                 </div>
-                <div className="history-pagination-actions-end">
-                  <button
-                    type="button"
-                    className="btn-import history-pagination-nav"
-                    disabled={sessionListPage >= sessionListTotalPages - 1}
-                    onClick={() => void loadSessionListPage(sessionListPage + 1)}
-                  >
-                    Siguiente
-                  </button>
-                </div>
-              </div>
+              )}
             </div>
           )}
         </section>
 
-        <section className="card import-card">
-          <h2>Importar archivos</h2>
+        {showImportForm && (
+        <section className="card import-card" id="importar-archivos">
+          <div className="import-card-head">
+            <h2>Importar archivos</h2>
+            <button type="button" className="btn-secondary" onClick={closeImportForm}>
+              Cancelar
+            </button>
+          </div>
           <p className="import-batch-hint">
             Podés subir <strong>varios Excel del mismo mes</strong> por lado (resúmenes de tarjetas,
             plataformas, etc.). Se crea <strong>una sola sesión</strong> y después conciliás todo junto.
@@ -4004,70 +4160,101 @@ export default function ConciliacionPage() {
             </div>
           )}
         </section>
+        )}
 
         <section
-          className={sessionClosed ? 'card card--session-closed' : 'card'}
+          className={
+            selectedId == null
+              ? 'card session-detail-card'
+              : `session-detail-card session-detail-card--open${sessionClosed ? ' session-detail-card--closed' : ''}`
+          }
           id="detalle-conciliacion"
         >
-          <h2>Detalle y conciliación</h2>
           {selectedId == null && (
-            <p className="msg">Elegí una sesión en la lista o importá archivos nuevos.</p>
+            <>
+              <h2 className="session-detail-card-title">Detalle y conciliación</h2>
+              <p className="msg">
+                {showImportForm
+                  ? 'Completá la importación para abrir la nueva sesión.'
+                  : 'Elegí una sesión en el historial o usá «Nueva conciliación» para importar archivos.'}
+              </p>
+            </>
           )}
           {selectedId != null && (
             <div className="session-detail-shell">
+              <p className="session-detail-eyebrow">Detalle y conciliación</p>
               <div className="session-detail-head">
                 {detailMatchesSelection && !detailLoading ? (
                   <SessionDisplayNameEditor
                     sessionId={selectedId}
                     createdAt={detail.session.createdAt}
                     displayName={detail.session.displayName}
+                    status={detail.session.status}
                     readOnly={user?.role === 'CONSULTA'}
                     onSaved={(displayName) => handleSessionRenamed(selectedId, displayName)}
                   />
                 ) : selectedId != null ? (
-                  <div className="session-display-name-view">
+                  <div className="session-display-name-view session-display-name-view--loading">
                     <h3 className="session-detail-title">Sesión #{selectedId}</h3>
+                    <p className="session-detail-subtitle">Cargando datos de la sesión…</p>
                   </div>
                 ) : null}
                 <div className="session-detail-head-actions">
-                  <button
-                    type="button"
-                    className="btn-secondary session-export-btn"
-                    disabled={exportLoading}
-                    onClick={() => void downloadSessionExcel(selectedId)}
-                  >
-                    {exportLoading ? 'Generando…' : 'Exportar Excel'}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn-secondary session-export-pdf-btn"
-                    title="Resumen ejecutivo, conciliados y pendientes"
-                    disabled={exportLoading}
-                    onClick={() => void downloadSessionPdf(selectedId)}
-                  >
-                    {exportLoading ? 'Generando…' : 'Exportar PDF'}
-                  </button>
-                  {detailMatchesSelection && !detailLoading && !sessionClosed && (
-                    <button
-                      type="button"
-                      className="btn-secondary session-close-btn"
-                      disabled={closeSessionLoading}
-                      onClick={() => void handleCloseSession()}
-                    >
-                      {closeSessionLoading ? 'Cerrando…' : 'Cerrar conciliación'}
-                    </button>
-                  )}
-                  {detailMatchesSelection && !detailLoading && sessionClosed && user?.role === 'ADMIN' && (
-                    <button
-                      type="button"
-                      className="btn-secondary session-reopen-btn"
-                      disabled={reopenSessionLoading}
-                      onClick={() => void handleReopenSession()}
-                      title="Solo administrador; queda registrado en Actividad"
-                    >
-                      {reopenSessionLoading ? 'Reabriendo…' : 'Reabrir conciliación'}
-                    </button>
-                  )}
+                  <div className="session-detail-actions-panel" aria-label="Acciones de sesión">
+                    <div className="session-detail-actions-group">
+                      <span className="session-detail-actions-label">Exportar</span>
+                      <div className="session-detail-actions-buttons">
+                        <button
+                          type="button"
+                          className="btn-secondary session-export-btn"
+                          disabled={exportLoading}
+                          onClick={() => void downloadSessionExcel(selectedId)}
+                        >
+                          {exportLoading ? 'Generando…' : 'Excel'}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-secondary session-export-pdf-btn"
+                          title="Resumen ejecutivo, conciliados y pendientes"
+                          disabled={exportLoading}
+                          onClick={() => void downloadSessionPdf(selectedId)}
+                        >
+                          {exportLoading ? 'Generando…' : 'PDF'}
+                        </button>
+                      </div>
+                    </div>
+                    {detailMatchesSelection && !detailLoading && !sessionClosed && (
+                      <div className="session-detail-actions-group session-detail-actions-group--primary">
+                        <span className="session-detail-actions-label">Sesión</span>
+                        <div className="session-detail-actions-buttons">
+                          <button
+                            type="button"
+                            className="btn-secondary session-close-btn"
+                            disabled={closeSessionLoading}
+                            onClick={() => void handleCloseSession()}
+                          >
+                            {closeSessionLoading ? 'Cerrando…' : 'Cerrar conciliación'}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    {detailMatchesSelection && !detailLoading && sessionClosed && user?.role === 'ADMIN' && (
+                      <div className="session-detail-actions-group session-detail-actions-group--primary">
+                        <span className="session-detail-actions-label">Sesión</span>
+                        <div className="session-detail-actions-buttons">
+                          <button
+                            type="button"
+                            className="btn-secondary session-reopen-btn"
+                            disabled={reopenSessionLoading}
+                            onClick={() => void handleReopenSession()}
+                            title="Solo administrador; queda registrado en Actividad"
+                          >
+                            {reopenSessionLoading ? 'Reabriendo…' : 'Reabrir conciliación'}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
 
@@ -4095,98 +4282,12 @@ export default function ConciliacionPage() {
                 <SessionCheckpointsSection sessionId={selectedId} />
               )}
 
-              <div className="session-detail-run">
-                <div className="session-tolerance-fields">
-                  <label className="session-tolerance-field">
-                    <span>Tolerancia de fechas (días)</span>
-                    <input
-                      type="number"
-                      min={0}
-                      max={60}
-                      step={1}
-                      readOnly={reconcileLocked}
-                      title="Flechas ↑ ↓: sumar o restar un día"
-                      value={toleranceDays}
-                      onChange={(ev) => setToleranceDays(Number(ev.target.value))}
-                      onKeyDown={(ev) => {
-                        if (reconcileLocked) return
-                        if (ev.key !== 'ArrowUp' && ev.key !== 'ArrowDown') return
-                        ev.preventDefault()
-                        const dir = ev.key === 'ArrowUp' ? 1 : -1
-                        setToleranceDays((d) => stepToleranceDays(dir, Number.isFinite(d) ? d : 0))
-                      }}
-                    />
-                  </label>
-                  <label className="session-tolerance-field">
-                    <span>Tolerancia importe (±)</span>
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      autoComplete="off"
-                      readOnly={reconcileLocked}
-                      title="Flechas ↑ ↓: sumar o restar 0,01 en el importe"
-                      value={amountToleranceText}
-                      onChange={(ev) => {
-                        const raw = ev.target.value
-                        setAmountToleranceText(raw)
-                        const n = parseBalanceInput(raw)
-                        if (n != null && n >= 0) {
-                          setAmountTolerance(n)
-                        }
-                      }}
-                      onKeyDown={(ev) => {
-                        if (reconcileLocked) return
-                        if (ev.key !== 'ArrowUp' && ev.key !== 'ArrowDown') return
-                        ev.preventDefault()
-                        const dir = ev.key === 'ArrowUp' ? 1 : -1
-                        setAmountTolerance((prev) => {
-                          const next = stepToleranceAmount(dir, prev)
-                          setAmountToleranceText(formatToleranceInputDisplay(next))
-                          return next
-                        })
-                      }}
-                      onBlur={() => {
-                        const n = parseBalanceInput(amountToleranceText)
-                        if (n != null && n >= 0) {
-                          setAmountTolerance(n)
-                          setAmountToleranceText(formatToleranceInputDisplay(n))
-                        } else {
-                          setAmountToleranceText(formatToleranceInputDisplay(amountTolerance))
-                        }
-                      }}
-                    />
-                  </label>
-                </div>
-                <button
-                  type="button"
-                  className="btn-import session-conciliar-btn"
-                  disabled={conciliarLoading || reconcileLocked}
-                  onClick={() => void handleConciliar()}
-                >
-                  {conciliarLoading ? 'Conciliando…' : 'Ejecutar conciliación'}
-                </button>
-              </div>
-              {conciliarError && <p className="msg err session-detail-msg">{conciliarError}</p>}
-              {exportError && (
-                <p className="msg err session-detail-msg" role="alert">
-                  {exportError}
-                </p>
-              )}
-
               {detailMatchesSelection && detailLoading && (
                 <p className="msg subtle session-detail-meta-loading">Cargando datos de la sesión…</p>
               )}
 
               {detailMatchesSelection && detail && !detailLoading && (
                 <div className="session-detail-meta">
-                  <div className="session-detail-meta-row">
-                    <span className="session-detail-meta-k">Estado</span>
-                    <span
-                      className={`session-status-pill session-status-pill--${detail.session.status.toLowerCase()}`}
-                    >
-                      {sessionStatusLabel(detail.session.status)}
-                    </span>
-                  </div>
                   <SessionSourceFiles
                     bankFileName={detail.session.sourceBankFileName}
                     companyFileName={detail.session.sourceCompanyFileName}
@@ -4195,20 +4296,101 @@ export default function ConciliacionPage() {
                 </div>
               )}
 
-              {conciliarResult && (
-                <dl className="status-dl session-conciliar-result">
-                  <dt>Pares automáticos (esta corrida)</dt>
-                  <dd>{conciliarResult.pairsCreated}</dd>
-                  <dt>Sin match banco</dt>
-                  <dd>{conciliarResult.unmatchedBank}</dd>
-                  <dt>Sin match empresa</dt>
-                  <dd>{conciliarResult.unmatchedCompany}</dd>
-                  <dt>Tolerancias usadas</dt>
-                  <dd>
-                    {conciliarResult.dateToleranceDays} días · importe ±{' '}
-                    {formatToleranceInputDisplay(Number(conciliarResult.amountTolerance))}
-                  </dd>
-                </dl>
+              {detailMatchesSelection && !detailLoading && (
+                <>
+                  <div className="session-detail-run">
+                    <div className="session-tolerance-fields">
+                      <label className="session-tolerance-field">
+                        <span>Tolerancia de fechas (días)</span>
+                        <input
+                          type="number"
+                          min={0}
+                          max={60}
+                          step={1}
+                          readOnly={reconcileLocked}
+                          title="Flechas ↑ ↓: sumar o restar un día"
+                          value={toleranceDays}
+                          onChange={(ev) => setToleranceDays(Number(ev.target.value))}
+                          onKeyDown={(ev) => {
+                            if (reconcileLocked) return
+                            if (ev.key !== 'ArrowUp' && ev.key !== 'ArrowDown') return
+                            ev.preventDefault()
+                            const dir = ev.key === 'ArrowUp' ? 1 : -1
+                            setToleranceDays((d) => stepToleranceDays(dir, Number.isFinite(d) ? d : 0))
+                          }}
+                        />
+                      </label>
+                      <label className="session-tolerance-field">
+                        <span>Tolerancia importe (±)</span>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          autoComplete="off"
+                          readOnly={reconcileLocked}
+                          title="Flechas ↑ ↓: sumar o restar 0,01 en el importe"
+                          value={amountToleranceText}
+                          onChange={(ev) => {
+                            const raw = ev.target.value
+                            setAmountToleranceText(raw)
+                            const n = parseBalanceInput(raw)
+                            if (n != null && n >= 0) {
+                              setAmountTolerance(n)
+                            }
+                          }}
+                          onKeyDown={(ev) => {
+                            if (reconcileLocked) return
+                            if (ev.key !== 'ArrowUp' && ev.key !== 'ArrowDown') return
+                            ev.preventDefault()
+                            const dir = ev.key === 'ArrowUp' ? 1 : -1
+                            setAmountTolerance((prev) => {
+                              const next = stepToleranceAmount(dir, prev)
+                              setAmountToleranceText(formatToleranceInputDisplay(next))
+                              return next
+                            })
+                          }}
+                          onBlur={() => {
+                            const n = parseBalanceInput(amountToleranceText)
+                            if (n != null && n >= 0) {
+                              setAmountTolerance(n)
+                              setAmountToleranceText(formatToleranceInputDisplay(n))
+                            } else {
+                              setAmountToleranceText(formatToleranceInputDisplay(amountTolerance))
+                            }
+                          }}
+                        />
+                      </label>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn-import session-conciliar-btn"
+                      disabled={conciliarLoading || reconcileLocked}
+                      onClick={() => void handleConciliar()}
+                    >
+                      {conciliarLoading ? 'Conciliando…' : 'Ejecutar conciliación'}
+                    </button>
+                  </div>
+                  {conciliarError && <p className="msg err session-detail-msg">{conciliarError}</p>}
+                  {conciliarResult && (
+                    <dl className="status-dl session-conciliar-result">
+                      <dt>Pares automáticos (esta corrida)</dt>
+                      <dd>{conciliarResult.pairsCreated}</dd>
+                      <dt>Sin match banco</dt>
+                      <dd>{conciliarResult.unmatchedBank}</dd>
+                      <dt>Sin match empresa</dt>
+                      <dd>{conciliarResult.unmatchedCompany}</dd>
+                      <dt>Tolerancias usadas</dt>
+                      <dd>
+                        {conciliarResult.dateToleranceDays} días · importe ±{' '}
+                        {formatToleranceInputDisplay(Number(conciliarResult.amountTolerance))}
+                      </dd>
+                    </dl>
+                  )}
+                </>
+              )}
+              {exportError && (
+                <p className="msg err session-detail-msg" role="alert">
+                  {exportError}
+                </p>
               )}
             </div>
           )}
@@ -4238,7 +4420,6 @@ export default function ConciliacionPage() {
                   closingCompanyBalance: detail.session.closingCompanyBalance,
                 }}
               />
-              <PendingGuide />
 
               <div className="detail-view-toggle-wrap">
                 <span className="detail-view-toggle-label">Vistas</span>
@@ -4247,7 +4428,7 @@ export default function ConciliacionPage() {
                     type="button"
                     role="tab"
                     aria-selected={detailLayout === 'compare'}
-                    className={detailLayout === 'compare' ? 'session-pill active' : 'session-pill'}
+                    className="detail-view-tab"
                     onClick={() => setDetailLayout('compare')}
                   >
                     Comparativa
@@ -4255,17 +4436,8 @@ export default function ConciliacionPage() {
                   <button
                     type="button"
                     role="tab"
-                    aria-selected={detailLayout === 'complete'}
-                    className={detailLayout === 'complete' ? 'session-pill active' : 'session-pill'}
-                    onClick={() => setDetailLayout('complete')}
-                  >
-                    Completa
-                  </button>
-                  <button
-                    type="button"
-                    role="tab"
                     aria-selected={detailLayout === 'rubro'}
-                    className={detailLayout === 'rubro' ? 'session-pill active' : 'session-pill'}
+                    className="detail-view-tab"
                     onClick={() => setDetailLayout('rubro')}
                   >
                     Por rubro
@@ -4273,8 +4445,17 @@ export default function ConciliacionPage() {
                   <button
                     type="button"
                     role="tab"
+                    aria-selected={detailLayout === 'complete'}
+                    className="detail-view-tab"
+                    onClick={() => setDetailLayout('complete')}
+                  >
+                    Completa
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
                     aria-selected={detailLayout === 'classic'}
-                    className={detailLayout === 'classic' ? 'session-pill active' : 'session-pill'}
+                    className="detail-view-tab"
                     onClick={() => setDetailLayout('classic')}
                   >
                     Tablas clásicas
@@ -4403,6 +4584,10 @@ export default function ConciliacionPage() {
                     reconcileLocked={reconcileLocked}
                     manualLinkLoading={manualLoading}
                     manualLinkError={manualError}
+                    classificationReadOnly={classificationReadOnly}
+                    classificationSuggestions={classificationSuggestions}
+                    onSetClassification={(side, txId, c) => void handleSetClassification(side, txId, c)}
+                    onSetPairClassification={(pairId, c) => void handleSetPairClassification(pairId, c)}
                     onManualPair={
                       reconcileLocked
                         ? undefined
@@ -4412,6 +4597,11 @@ export default function ConciliacionPage() {
                       setDetailLayout('compare')
                       requestAnimationFrame(() => scrollToComparisonRow(rowKey))
                     }}
+                    onUnlinkPair={
+                      reconcileLocked || classificationReadOnly
+                        ? undefined
+                        : (pairId, matchSource) => handleUnlinkPair(pairId, matchSource)
+                    }
                   />
                 </>
               ) : (
@@ -4569,15 +4759,13 @@ export default function ConciliacionPage() {
                 </>
               )}
 
-              <h3 className="subsection-title">Vínculo manual</h3>
-              <p className="hint">
-                En comparativa o vista completa, hacé clic en <strong>Posible match</strong> o{' '}
-                <strong>Duplicado</strong> para ver el detalle al lado y vincular desde ahí. También
-                podés copiar los <strong>ID</strong> de la tabla (solo dígitos). Ambos movimientos deben
-                seguir <strong>pendientes</strong>. Los vínculos manuales no se borran al conciliar en
-                automático. En pares automáticos podés usar <strong>Desvincular</strong> para devolverlos
-                a pendientes sin re-conciliar toda la sesión.
-              </p>
+              <SubsectionTitleRow
+                help={<ManualLinkHelpText />}
+                helpAriaLabel="Ayuda sobre vínculo manual"
+                helpDialogLabel="Ayuda de vínculo manual"
+              >
+                Vínculo manual
+              </SubsectionTitleRow>
               <div
                 className="manual-pair-toolbar"
                 role="group"
@@ -4624,6 +4812,13 @@ export default function ConciliacionPage() {
                   {manualLoading ? 'Guardando…' : 'Vincular'}
                 </button>
               </div>
+              {detail ? (
+                <ManualLinkPreview
+                  detail={detail}
+                  bankIdRaw={manualBankId}
+                  companyIdRaw={manualCompanyId}
+                />
+              ) : null}
               {manualError && <p className="msg err">{manualError}</p>}
             </>
           )}

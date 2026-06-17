@@ -123,6 +123,20 @@ export function parseFocusFromSearchParam(
   return { kind: 'pair', pairId: id }
 }
 
+export function parseSessionIdFromSearchParam(
+  params: URLSearchParams | string | null | undefined,
+): number | null {
+  const raw =
+    params instanceof URLSearchParams
+      ? params.get('sesion')
+      : typeof params === 'string'
+        ? new URLSearchParams(params.startsWith('?') ? params.slice(1) : params).get('sesion')
+        : null
+  if (!raw?.trim()) return null
+  const id = Number(raw.trim())
+  return Number.isFinite(id) && Number.isInteger(id) && id > 0 ? id : null
+}
+
 export function buildShareRefFromComparisonRow(
   sessionId: number,
   row: ComparisonRow,
