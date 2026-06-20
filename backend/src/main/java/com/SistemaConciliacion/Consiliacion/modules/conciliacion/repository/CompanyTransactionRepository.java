@@ -14,5 +14,7 @@ public interface CompanyTransactionRepository extends JpaRepository<CompanyTrans
 	long countBySession_Id(Long sessionId);
 
 	Optional<CompanyTransaction> findByIdAndSession_Id(Long id, Long sessionId);
+
+	boolean existsBySession_IdAndContentFingerprint(Long sessionId, String contentFingerprint);
 }
 

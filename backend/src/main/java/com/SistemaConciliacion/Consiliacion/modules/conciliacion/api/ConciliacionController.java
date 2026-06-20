@@ -40,20 +40,28 @@ import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.Concili
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.ManualPairRequestDto;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.ManualPairResponseDto;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.MovementAttachmentDto;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.ReimportPreviewDto;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.ReimportResultDto;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.ReopenSessionRequestDto;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.SessionBalancesDto;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.CreateCheckpointRequestDto;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.DeferMovementRequestDto;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.DeferredMovementDto;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.IncorporateDeferredRequestDto;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.IncorporateDeferredResultDto;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.SessionCheckpointDto;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.SessionDisplayNameDto;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.SessionDetailDto;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.SessionHeaderDto;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.SessionAuditEntryDto;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.SessionSummaryDto;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.service.ConciliacionDeferredMovementService;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.service.ConciliacionExportService;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.service.ConciliacionExportService.ExportKind;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.service.ConciliacionImportService;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.service.ConciliacionManualPairService;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.service.ConciliacionMatchingService;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.service.ConciliacionReimportService;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.service.MovementAttachmentService;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.service.MovementAttachmentService.ResourceWithMeta;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.service.PairAttachmentService;
@@ -70,6 +78,7 @@ public class ConciliacionController {
 	private static final ObjectMapper IMPORT_LAYOUT_JSON = new ObjectMapper();
 
 	private final ConciliacionImportService conciliacionImportService;
+	private final ConciliacionReimportService conciliacionReimportService;
 	private final ConciliacionSessionService conciliacionSessionService;
 	private final ConciliacionMatchingService conciliacionMatchingService;
 	private final ConciliacionManualPairService conciliacionManualPairService;
@@ -78,8 +87,10 @@ public class ConciliacionController {
 	private final PairAttachmentService pairAttachmentService;
 	private final SessionAuditService sessionAuditService;
 	private final SessionCheckpointService sessionCheckpointService;
+	private final ConciliacionDeferredMovementService deferredMovementService;
 
 	public ConciliacionController(ConciliacionImportService conciliacionImportService,
+			ConciliacionReimportService conciliacionReimportService,
 			ConciliacionSessionService conciliacionSessionService,
 			ConciliacionMatchingService conciliacionMatchingService,
 			ConciliacionManualPairService conciliacionManualPairService,
@@ -87,8 +98,10 @@ public class ConciliacionController {
 			MovementAttachmentService movementAttachmentService,
 			PairAttachmentService pairAttachmentService,
 			SessionAuditService sessionAuditService,
-			SessionCheckpointService sessionCheckpointService) {
+			SessionCheckpointService sessionCheckpointService,
+			ConciliacionDeferredMovementService deferredMovementService) {
 		this.conciliacionImportService = conciliacionImportService;
+		this.conciliacionReimportService = conciliacionReimportService;
 		this.conciliacionSessionService = conciliacionSessionService;
 		this.conciliacionMatchingService = conciliacionMatchingService;
 		this.conciliacionManualPairService = conciliacionManualPairService;
@@ -97,6 +110,7 @@ public class ConciliacionController {
 		this.pairAttachmentService = pairAttachmentService;
 		this.sessionAuditService = sessionAuditService;
 		this.sessionCheckpointService = sessionCheckpointService;
+		this.deferredMovementService = deferredMovementService;
 	}
 
 	@GetMapping("/status")
@@ -120,6 +134,38 @@ public class ConciliacionController {
 			}
 		}
 		return conciliacionImportService.importFiles(bankFiles, companyFiles, layout);
+	}
+
+	/**
+	 * Reimportación incremental en sesión abierta (solo banco o solo empresa).
+	 * {@code preview=true} devuelve conteos sin persistir; {@code preview=false} aplica cambios.
+	 */
+	@PostMapping(value = "/sessions/{id}/reimport", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+	@PreAuthorize("hasAnyRole('ADMIN', 'OPERADOR')")
+	public ResponseEntity<?> reimportSession(@PathVariable long id,
+			@RequestParam("side") String side,
+			@RequestParam(value = "preview", defaultValue = "true") boolean preview,
+			@RequestParam("file") List<MultipartFile> files,
+			@RequestParam(value = "layout", required = false) String layoutJson) throws IOException {
+		ImportLayoutDto layout = parseLayoutJson(layoutJson);
+		var parsedSide = ConciliacionReimportService.parseSide(side);
+		if (preview) {
+			ReimportPreviewDto dto = conciliacionReimportService.preview(id, parsedSide, files, layout);
+			return ResponseEntity.ok(dto);
+		}
+		ReimportResultDto dto = conciliacionReimportService.apply(id, parsedSide, files, layout);
+		return ResponseEntity.ok(dto);
+	}
+
+	private static ImportLayoutDto parseLayoutJson(String layoutJson) {
+		if (layoutJson == null || layoutJson.isBlank()) {
+			return null;
+		}
+		try {
+			return IMPORT_LAYOUT_JSON.readValue(layoutJson, ImportLayoutDto.class);
+		} catch (JsonProcessingException e) {
+			throw new IllegalArgumentException("Parámetro layout: JSON inválido.");
+		}
 	}
 
 	@GetMapping("/sessions")
@@ -222,6 +268,38 @@ public class ConciliacionController {
 			@RequestBody(required = false) ClassificationUpdateDto body) {
 		conciliacionSessionService.putPairClassification(id, pairId,
 				body != null ? body : new ClassificationUpdateDto(null));
+	}
+
+	@PreAuthorize("hasAnyRole('ADMIN', 'OPERADOR')")
+	@GetMapping("/diferidos/disponibles")
+	public List<DeferredMovementDto> listAvailableDeferred() {
+		return deferredMovementService.listAvailable();
+	}
+
+	@PreAuthorize("hasAnyRole('ADMIN', 'OPERADOR')")
+	@GetMapping("/sessions/{id}/diferidos/disponibles")
+	public List<DeferredMovementDto> listAvailableDeferredForSession(@PathVariable long id) {
+		return deferredMovementService.listAvailableForSession(id);
+	}
+
+	@PreAuthorize("hasAnyRole('ADMIN', 'OPERADOR')")
+	@PostMapping(value = "/sessions/{id}/diferidos", consumes = MediaType.APPLICATION_JSON_VALUE)
+	public DeferredMovementDto deferMovement(@PathVariable long id, @RequestBody DeferMovementRequestDto body) {
+		return deferredMovementService.defer(id, body);
+	}
+
+	@PreAuthorize("hasAnyRole('ADMIN', 'OPERADOR')")
+	@PostMapping(value = "/sessions/{id}/diferidos/incorporar", consumes = MediaType.APPLICATION_JSON_VALUE)
+	public IncorporateDeferredResultDto incorporateDeferred(@PathVariable long id,
+			@RequestBody IncorporateDeferredRequestDto body) {
+		return deferredMovementService.incorporate(id, body);
+	}
+
+	@PreAuthorize("hasAnyRole('ADMIN', 'OPERADOR')")
+	@PostMapping("/diferidos/{deferredId}/restaurar")
+	@ResponseStatus(HttpStatus.NO_CONTENT)
+	public void restoreDeferred(@PathVariable long deferredId) {
+		deferredMovementService.restore(deferredId);
 	}
 
 	@GetMapping("/sessions/{id}/pending/banco/{txId}/comentarios")

@@ -17,6 +17,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.ImportFileSummaryDto;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.ImportLayoutDto;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.BankTransaction;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.CompanyTransaction;
@@ -79,16 +80,25 @@ public class ConciliacionImportService {
 		session.setStatus(SessionStatus.IMPORTED);
 		session = sessionRepository.save(session);
 		session.setDisplayName(defaultDisplayName(session.getCreatedAt()));
-		session = sessionRepository.save(session);
 
 		List<BankTransaction> allBankRows = new ArrayList<>();
+		List<ImportFileSummaryDto> bankSummaries = new ArrayList<>();
 		for (MultipartFile bankFile : banks) {
-			allBankRows.addAll(parseBankWorkbook(bankFile, session, bankLayout));
+			List<BankTransaction> rows = parseBankWorkbook(bankFile, session, bankLayout);
+			allBankRows.addAll(rows);
+			bankSummaries.add(new ImportFileSummaryDto(displayFileName(bankFile), rows.size()));
 		}
 		List<CompanyTransaction> allCompanyRows = new ArrayList<>();
+		List<ImportFileSummaryDto> companySummaries = new ArrayList<>();
 		for (MultipartFile companyFile : companies) {
-			allCompanyRows.addAll(parseCompanyWorkbook(companyFile, session, companyLayout));
+			List<CompanyTransaction> rows = parseCompanyWorkbook(companyFile, session, companyLayout);
+			allCompanyRows.addAll(rows);
+			companySummaries.add(new ImportFileSummaryDto(displayFileName(companyFile), rows.size()));
 		}
+
+		session.setBankImportFileSummaries(bankSummaries);
+		session.setCompanyImportFileSummaries(companySummaries);
+		session = sessionRepository.save(session);
 
 		if (allBankRows.isEmpty()) {
 			throw new IllegalArgumentException("No se encontraron movimientos de banco en los archivos enviados.");
@@ -106,7 +116,7 @@ public class ConciliacionImportService {
 
 		return new ImportResult(session.getId(), allBankRows.size(), allCompanyRows.size(),
 				session.getSourceBankFileName(), session.getSourceCompanyFileName(), banks.size(),
-				companies.size());
+				companies.size(), bankSummaries, companySummaries);
 	}
 
 	private List<BankTransaction> parseBankWorkbook(MultipartFile bankFile, ReconciliationSession session,
@@ -124,6 +134,14 @@ public class ConciliacionImportService {
 			Sheet companySheet = sheetAt(companyWb, companyLayout.sheetIndex());
 			return plataformaWorkbookParser.parse(companySheet, session, companyLayout);
 		}
+	}
+
+	private static String displayFileName(MultipartFile file) {
+		String name = file.getOriginalFilename();
+		if (name == null || name.isBlank()) {
+			return "archivo";
+		}
+		return name;
 	}
 
 	private static List<MultipartFile> nonEmptyParts(List<MultipartFile> files, String role) {
@@ -183,6 +201,7 @@ public class ConciliacionImportService {
 	}
 
 	public record ImportResult(long sessionId, int bankRows, int companyRows, String sourceBankFileName,
-			String sourceCompanyFileName, int bankFileCount, int companyFileCount) {
+			String sourceCompanyFileName, int bankFileCount, int companyFileCount,
+			List<ImportFileSummaryDto> bankFileSummaries, List<ImportFileSummaryDto> companyFileSummaries) {
 	}
 }

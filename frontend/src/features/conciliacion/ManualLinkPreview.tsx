@@ -8,13 +8,15 @@ function MovementPreviewCard({
   title,
   m,
   pending,
+  side,
 }: {
   title: string
   m: MovimientoDto
   pending: boolean
+  side: 'bank' | 'company'
 }) {
   return (
-    <div className="counterpart-card manual-link-preview-card">
+    <div className={`counterpart-card counterpart-card--${side} manual-link-preview-card`}>
       <h4 className="counterpart-card-title">{title}</h4>
       <p
         className={
@@ -47,9 +49,19 @@ function MovementPreviewCard({
   )
 }
 
-function MissingPreviewCard({ title, message }: { title: string; message: string }) {
+function MissingPreviewCard({
+  title,
+  message,
+  side,
+}: {
+  title: string
+  message: string
+  side: 'bank' | 'company'
+}) {
   return (
-    <div className="counterpart-card counterpart-card--empty manual-link-preview-card">
+    <div
+      className={`counterpart-card counterpart-card--empty counterpart-card--${side} manual-link-preview-card`}
+    >
       <h4 className="counterpart-card-title">{title}</h4>
       <p className="manual-link-preview-missing">{message}</p>
     </div>
@@ -95,7 +107,7 @@ export function ManualLinkPreview({
       <div
         className={
           bothSides
-            ? 'counterpart-compare-grid manual-link-preview-grid'
+            ? 'counterpart-compare-grid counterpart-compare-grid--split manual-link-preview-grid'
             : 'counterpart-compare-grid manual-link-preview-grid manual-link-preview-grid--single'
         }
       >
@@ -104,13 +116,15 @@ export function ManualLinkPreview({
             <MissingPreviewCard
               title="Banco"
               message="ID inválido. Usá solo dígitos, sin espacios ni letras."
+              side="bank"
             />
           ) : bankMov ? (
-            <MovementPreviewCard title="Banco" m={bankMov} pending={bankPending} />
+            <MovementPreviewCard title="Banco" m={bankMov} pending={bankPending} side="bank" />
           ) : (
             <MissingPreviewCard
               title="Banco"
               message={`No hay movimiento banco con ID ${bankId} en esta sesión.`}
+              side="bank"
             />
           )
         ) : null}
@@ -119,13 +133,20 @@ export function ManualLinkPreview({
             <MissingPreviewCard
               title="Empresa"
               message="ID inválido. Usá solo dígitos, sin espacios ni letras."
+              side="company"
             />
           ) : companyMov ? (
-            <MovementPreviewCard title="Empresa" m={companyMov} pending={companyPending} />
+            <MovementPreviewCard
+              title="Empresa"
+              m={companyMov}
+              pending={companyPending}
+              side="company"
+            />
           ) : (
             <MissingPreviewCard
               title="Empresa"
               message={`No hay movimiento empresa con ID ${companyId} en esta sesión.`}
+              side="company"
             />
           )
         ) : null}

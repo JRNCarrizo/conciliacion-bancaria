@@ -12,6 +12,8 @@ import org.springframework.stereotype.Component;
 
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.CompanyTransaction;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.ReconciliationSession;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.service.ImportRowSnapshot;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.service.TransactionFingerprint;
 
 /**
  * Importa movimientos TES / resumen bancario. Por fila se guardan dos magnitudes:
@@ -74,7 +76,42 @@ public class PlataformaWorkbookParser {
 			ct.setAccountingAmount(accountingNet);
 			ct.setReference(reference);
 			ct.setDescription(ExcelCells.asString(row.getCell(layout.colObservacion())));
+			ct.setContentFingerprint(TransactionFingerprint.forCompany(ct));
 			out.add(ct);
+		}
+		if (out.isEmpty()) {
+			throw new IllegalArgumentException(
+					"Archivo de plataforma: no se importó ningún movimiento (revisá filas y columnas).");
+		}
+		return out;
+	}
+
+	public List<ImportRowSnapshot> parseSnapshots(Sheet sheet, CompanyGridLayout layout) {
+		assertHeader(sheet, layout);
+		List<ImportRowSnapshot> out = new ArrayList<>();
+		for (int r = layout.firstDataRowIndex(); r <= sheet.getLastRowNum(); r++) {
+			Row row = sheet.getRow(r);
+			if (row == null || isEmptyDataRow(row, layout)) {
+				continue;
+			}
+			LocalDate fechaBanco = ExcelCells.asLocalDate(row.getCell(layout.colFechaBanco()));
+			LocalDate fechaContable = ExcelCells.asLocalDate(row.getCell(layout.colFechaContable()));
+			LocalDate txDate = fechaBanco != null ? fechaBanco : fechaContable;
+			if (txDate == null) {
+				continue;
+			}
+			BigDecimal debe = ExcelCells.asBigDecimalOrZero(row.getCell(layout.colDebe()));
+			BigDecimal haber = ExcelCells.asBigDecimalOrZero(row.getCell(layout.colHaber()));
+			BigDecimal accountingNet = haber.subtract(debe);
+			BigDecimal reconciliationAmount = debe.subtract(haber);
+			if (reconciliationAmount.compareTo(BigDecimal.ZERO) == 0) {
+				continue;
+			}
+			String tipo = ExcelCells.asString(row.getCell(layout.colTipo()));
+			String numero = ExcelCells.asString(row.getCell(layout.colNumero()));
+			String reference = buildReference(tipo, numero);
+			String description = ExcelCells.asString(row.getCell(layout.colObservacion()));
+			out.add(ImportRowSnapshot.company(txDate, reconciliationAmount, accountingNet, reference, description));
 		}
 		if (out.isEmpty()) {
 			throw new IllegalArgumentException(

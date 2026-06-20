@@ -164,6 +164,28 @@ public class MovementAttachmentService {
 		return new ResourceWithMeta(new FileSystemResource(filePath), a.getOriginalFilename(), ct);
 	}
 
+	/** Elimina adjuntos de un movimiento (disco + BD). Sin validar sesión cerrada (uso interno en reimportación). */
+	@Transactional
+	public void deleteAllForMovement(long sessionId, PendingMovementSide side, long txId) {
+		List<MovementAttachment> rows = movementAttachmentRepository
+				.findBySession_IdAndMovementSideAndMovementIdOrderByCreatedAtAsc(sessionId, side, txId);
+		if (rows.isEmpty()) {
+			return;
+		}
+		Path base = basePath();
+		for (MovementAttachment a : rows) {
+			Path filePath = base.resolve(a.getStoredPath()).normalize();
+			movementAttachmentRepository.delete(a);
+			if (filePath.startsWith(base)) {
+				try {
+					Files.deleteIfExists(filePath);
+				} catch (IOException ignored) {
+					// fila ya eliminada en BD
+				}
+			}
+		}
+	}
+
 	/** Movimiento (pendiente o conciliado en un par) perteneciente a la sesión. */
 	private void assertMovementInSession(long sessionId, PendingMovementSide side, long txId) {
 		if (side == PendingMovementSide.BANK) {

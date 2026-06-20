@@ -27,6 +27,7 @@ import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.Movimie
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.PendingCommentDto;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.ParDto;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.SessionBalancesDto;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.DeferredMovementDto;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.SessionDetailDto;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.SessionHeaderDto;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.SessionSummaryDto;
@@ -62,6 +63,7 @@ public class ConciliacionSessionService {
 	private final PairAttachmentRepository pairAttachmentRepository;
 	private final ReconciliationPairCommentRepository reconciliationPairCommentRepository;
 	private final SessionAuditService sessionAuditService;
+	private final ConciliacionDeferredMovementService deferredMovementService;
 
 	public ConciliacionSessionService(ReconciliationSessionRepository sessionRepository,
 			BankTransactionRepository bankTransactionRepository,
@@ -71,7 +73,8 @@ public class ConciliacionSessionService {
 			MovementAttachmentRepository movementAttachmentRepository,
 			PairAttachmentRepository pairAttachmentRepository,
 			ReconciliationPairCommentRepository reconciliationPairCommentRepository,
-			SessionAuditService sessionAuditService) {
+			SessionAuditService sessionAuditService,
+			ConciliacionDeferredMovementService deferredMovementService) {
 		this.sessionRepository = sessionRepository;
 		this.bankTransactionRepository = bankTransactionRepository;
 		this.companyTransactionRepository = companyTransactionRepository;
@@ -81,6 +84,7 @@ public class ConciliacionSessionService {
 		this.pairAttachmentRepository = pairAttachmentRepository;
 		this.reconciliationPairCommentRepository = reconciliationPairCommentRepository;
 		this.sessionAuditService = sessionAuditService;
+		this.deferredMovementService = deferredMovementService;
 	}
 
 	@Transactional(readOnly = true)
@@ -143,17 +147,22 @@ public class ConciliacionSessionService {
 		Map<Long, Long> pairAttachmentCounts = pairAttachmentCountMap(sessionId);
 		Map<Long, Long> pairCommentCounts = pairCommentCountMap(sessionId);
 
+		Map<Long, DeferredMovementDto> incorporatedDeferred = deferredMovementService
+				.incorporatedByTransactionId(sessionId);
+
 		List<MovimientoDto> bankDtos = banks.stream()
 				.map(t -> toBankMov(t, duplicateBankIds.contains(t.getId()), null, null,
 						commentCounts.getOrDefault(commentKey(PendingMovementSide.BANK, t.getId()), 0L),
 						attachmentCounts.getOrDefault(commentKey(PendingMovementSide.BANK, t.getId()), 0L),
-						classificationDisplayForBank(t, classificationByMatchedBankTxId)))
+						classificationDisplayForBank(t, classificationByMatchedBankTxId),
+						incorporatedDeferred.get(t.getId())))
 				.toList();
 		List<MovimientoDto> companyDtos = companies.stream()
 				.map(c -> toCompanyMov(c, duplicateCompanyIds.contains(c.getId()), null, null,
 						commentCounts.getOrDefault(commentKey(PendingMovementSide.COMPANY, c.getId()), 0L),
 						attachmentCounts.getOrDefault(commentKey(PendingMovementSide.COMPANY, c.getId()), 0L),
-						classificationDisplayForCompany(c, classificationByMatchedCompanyTxId)))
+						classificationDisplayForCompany(c, classificationByMatchedCompanyTxId),
+						incorporatedDeferred.get(c.getId())))
 				.toList();
 		List<MovimientoDto> unmatchedBank = unmatchedBankEntities.stream()
 				.map(t -> toBankMov(t, duplicateBankIds.contains(t.getId()), fuzzyBankToCompany.get(t.getId()),
@@ -162,7 +171,8 @@ public class ConciliacionSessionService {
 								: null,
 						commentCounts.getOrDefault(commentKey(PendingMovementSide.BANK, t.getId()), 0L),
 						attachmentCounts.getOrDefault(commentKey(PendingMovementSide.BANK, t.getId()), 0L),
-						classificationDisplayForBank(t, classificationByMatchedBankTxId)))
+						classificationDisplayForBank(t, classificationByMatchedBankTxId),
+						incorporatedDeferred.get(t.getId())))
 				.toList();
 		List<MovimientoDto> unmatchedCompany = unmatchedCompanyEntities.stream()
 				.map(c -> toCompanyMov(c, duplicateCompanyIds.contains(c.getId()), fuzzyCompanyToBank.get(c.getId()),
@@ -171,7 +181,8 @@ public class ConciliacionSessionService {
 								: null,
 						commentCounts.getOrDefault(commentKey(PendingMovementSide.COMPANY, c.getId()), 0L),
 						attachmentCounts.getOrDefault(commentKey(PendingMovementSide.COMPANY, c.getId()), 0L),
-						classificationDisplayForCompany(c, classificationByMatchedCompanyTxId)))
+						classificationDisplayForCompany(c, classificationByMatchedCompanyTxId),
+						incorporatedDeferred.get(c.getId())))
 				.toList();
 		BigDecimal gapThreshold = amountGapClassificationThreshold(s);
 		List<ParDto> parDtos = pairs.stream()
@@ -187,8 +198,12 @@ public class ConciliacionSessionService {
 			sessionAuditService.recordDetailAccess(sessionId);
 		}
 
+		List<DeferredMovementDto> deferredFromSession = deferredMovementService.listFromSession(sessionId);
+		List<DeferredMovementDto> deferredIntoSession = deferredMovementService.listIntoSession(sessionId);
+		long availableDeferredCount = deferredMovementService.countAvailableForSession(sessionId);
+
 		return new SessionDetailDto(toHeader(s), bankDtos, companyDtos, unmatchedBank, unmatchedCompany, parDtos,
-				stats);
+				stats, deferredFromSession, deferredIntoSession, availableDeferredCount);
 	}
 
 	@Transactional
@@ -418,7 +433,7 @@ public class ConciliacionSessionService {
 		return new SessionHeaderDto(s.getId(), s.getCreatedAt(), s.getDisplayName(), s.getSourceBankFileName(),
 				s.getSourceCompanyFileName(), s.getStatus().name(), s.getOpeningBankBalance(), s.getClosingBankBalance(),
 				s.getOpeningCompanyBalance(), s.getClosingCompanyBalance(), s.getAmountTolerance(),
-				s.getDateToleranceDays());
+				s.getDateToleranceDays(), s.getBankImportFileSummaries(), s.getCompanyImportFileSummaries());
 	}
 
 	private static String renameAuditDetail(String previous, String next) {
@@ -660,17 +675,33 @@ public class ConciliacionSessionService {
 	}
 
 	private MovimientoDto toBankMov(BankTransaction t, boolean duplicateInFile, Long fuzzyCounterpartId,
-			String fuzzyHint, long commentCount, long attachmentCount, String pendingClassification) {
+			String fuzzyHint, long commentCount, long attachmentCount, String pendingClassification,
+			DeferredMovementDto incorporatedFrom) {
 		return new MovimientoDto(t.getId(), t.getTxDate(), t.getAmount(), t.getDescription(), t.getReference(),
 				pendingClassification, null, duplicateInFile, fuzzyCounterpartId, fuzzyHint,
-				commentCount, attachmentCount);
+				commentCount, attachmentCount, deferredOriginId(incorporatedFrom),
+				deferredOriginSessionLabel(incorporatedFrom), deferredOriginSideFileName(incorporatedFrom));
 	}
 
 	private MovimientoDto toCompanyMov(CompanyTransaction t, boolean duplicateInFile, Long fuzzyCounterpartId,
-			String fuzzyHint, long commentCount, long attachmentCount, String pendingClassification) {
+			String fuzzyHint, long commentCount, long attachmentCount, String pendingClassification,
+			DeferredMovementDto incorporatedFrom) {
 		return new MovimientoDto(t.getId(), t.getTxDate(), t.getAmount(), t.getDescription(), t.getReference(),
 				pendingClassification, t.getAccountingAmount(), duplicateInFile,
-				fuzzyCounterpartId, fuzzyHint, commentCount, attachmentCount);
+				fuzzyCounterpartId, fuzzyHint, commentCount, attachmentCount, deferredOriginId(incorporatedFrom),
+				deferredOriginSessionLabel(incorporatedFrom), deferredOriginSideFileName(incorporatedFrom));
+	}
+
+	private static Long deferredOriginId(DeferredMovementDto incorporatedFrom) {
+		return incorporatedFrom != null ? incorporatedFrom.id() : null;
+	}
+
+	private static String deferredOriginSessionLabel(DeferredMovementDto incorporatedFrom) {
+		return incorporatedFrom != null ? incorporatedFrom.sourceSessionLabel() : null;
+	}
+
+	private static String deferredOriginSideFileName(DeferredMovementDto incorporatedFrom) {
+		return incorporatedFrom != null ? incorporatedFrom.sourceSideFileName() : null;
 	}
 
 	private static String commentKey(PendingMovementSide side, long movementId) {

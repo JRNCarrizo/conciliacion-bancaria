@@ -16,6 +16,8 @@ public interface PendingMovementCommentRepository extends JpaRepository<PendingM
 
 	List<PendingMovementComment> findBySession_IdOrderByCreatedAtAsc(long sessionId);
 
+	void deleteBySession_IdAndMovementSideAndMovementId(long sessionId, PendingMovementSide side, long movementId);
+
 	@Query("SELECT c.movementSide, c.movementId, COUNT(c) FROM PendingMovementComment c WHERE c.session.id = :sid GROUP BY c.movementSide, c.movementId")
 	List<Object[]> countByMovementGrouped(@Param("sid") long sessionId);
 }

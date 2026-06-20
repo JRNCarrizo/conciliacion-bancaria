@@ -80,8 +80,12 @@ public class SessionAuditService {
 			case REOPEN_SESSION -> "Reabrió la conciliación";
 			case VIEW_DETAIL -> "Abrió el detalle de la sesión";
 			case UNLINK_PAIR -> "Desvinculó un par";
+			case REIMPORT -> "Actualizó archivo importado";
 			case SAVE_CHECKPOINT -> "Guardó corte de jornada";
 			case RENAME_SESSION -> "Renombró la sesión";
+			case DEFER_MOVEMENT -> "Diferido a próxima conciliación";
+			case INCORPORATE_DEFERRED -> "Incorporó diferidos";
+			case RESTORE_DEFERRED -> "Restauró diferido";
 		};
 	}
 }

@@ -50,6 +50,11 @@ export type ImportCompanyLayoutInput = {
   skipHeaderValidation: boolean
 }
 
+export type ImportFileSummary = {
+  fileName: string
+  rowCount: number
+}
+
 export type ImportResult = {
   sessionId: number
   bankRows: number
@@ -58,6 +63,29 @@ export type ImportResult = {
   sourceCompanyFileName: string
   bankFileCount: number
   companyFileCount: number
+  bankFileSummaries: ImportFileSummary[]
+  companyFileSummaries: ImportFileSummary[]
+}
+
+export type ReimportPreview = {
+  side: string
+  unchangedCount: number
+  addedCount: number
+  updatedCount: number
+  removedCount: number
+  pairsToUnlinkCount: number
+}
+
+export type ReimportResult = {
+  side: string
+  unchangedCount: number
+  addedCount: number
+  updatedCount: number
+  removedCount: number
+  pairsUnlinkedCount: number
+  bankRowCount: number
+  companyRowCount: number
+  sourceFileName: string
 }
 
 export type SessionSummary = {
@@ -123,6 +151,10 @@ export type MovimientoDto = {
   commentCount?: number
   /** Archivos adjuntos (comprobantes) en el pendiente. */
   attachmentCount?: number
+  /** Incorporado desde la bolsa de diferidos. */
+  deferredOriginId?: number | null
+  deferredOriginSessionLabel?: string | null
+  deferredOriginSideFileName?: string | null
 }
 
 export type MovementAttachmentDto = {
@@ -232,6 +264,8 @@ export type SessionDetail = {
     /** Última tolerancia de importe usada al conciliar; la UI «EXACT vs Δ» la usa como umbral. */
     amountTolerance?: number | null
     dateToleranceDays?: number | null
+    bankFileSummaries?: ImportFileSummary[] | null
+    companyFileSummaries?: ImportFileSummary[] | null
   }
   bankTransactions: MovimientoDto[]
   companyTransactions: MovimientoDto[]
@@ -239,6 +273,37 @@ export type SessionDetail = {
   unmatchedCompanyTransactions: MovimientoDto[]
   pairs: ParDto[]
   stats: ConciliacionStatsDto
+  deferredFromSession: DeferredMovement[]
+  deferredIntoSession: DeferredMovement[]
+  availableDeferredCount: number
+}
+
+export type DeferredMovement = {
+  id: number
+  side: 'bank' | 'company'
+  txDate: string
+  amount: number
+  accountingAmount: number | null
+  reference: string | null
+  description: string | null
+  pendingClassification: string | null
+  sourceSessionId: number
+  sourceSessionLabel: string
+  sourceTransactionId: number | null
+  excludedAt: string
+  excludedBy: string | null
+  note: string | null
+  status: 'AVAILABLE' | 'CONSUMED'
+  consumedSessionId: number | null
+  createdTransactionId: number | null
+  sourceSideFileName: string | null
+  consumedSessionLabel: string | null
+}
+
+export type IncorporateDeferredResult = {
+  addedCount: number
+  warnings: string[]
+  incorporated: DeferredMovement[]
 }
 
 export type ConciliacionRunResult = {
@@ -271,3 +336,4 @@ export type CompareFilterKind =
   | 'opposite-sign'
   | 'fuzzy'
   | 'duplicate'
+  | 'deferred-in'

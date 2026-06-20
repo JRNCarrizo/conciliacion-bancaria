@@ -11,8 +11,16 @@ public enum SessionAuditEventType {
 	VIEW_DETAIL,
 	/** Quitar un vínculo manual o automático; los movimientos vuelven a pendientes. */
 	UNLINK_PAIR,
+	/** Actualización incremental de archivo banco o empresa en sesión abierta. */
+	REIMPORT,
 	/** Corte de jornada: snapshot PDF + resumen KPIs sin cerrar la sesión. */
 	SAVE_CHECKPOINT,
 	/** Cambio del nombre legible de la sesión. */
-	RENAME_SESSION
+	RENAME_SESSION,
+	/** Pendiente enviado a la bolsa de diferidos (próxima conciliación). */
+	DEFER_MOVEMENT,
+	/** Diferidos incorporados desde períodos anteriores. */
+	INCORPORATE_DEFERRED,
+	/** Diferido devuelto a pendientes de la sesión origen. */
+	RESTORE_DEFERRED
 }

@@ -40,6 +40,9 @@ public class BankTransaction {
 	@Column(name = "pending_classification", length = 128)
 	private String pendingClassification;
 
+	@Column(name = "content_fingerprint", length = 64)
+	private String contentFingerprint;
+
 	public Long getId() {
 		return id;
 	}
@@ -94,5 +97,13 @@ public class BankTransaction {
 
 	public void setPendingClassification(String pendingClassification) {
 		this.pendingClassification = pendingClassification;
+	}
+
+	public String getContentFingerprint() {
+		return contentFingerprint;
+	}
+
+	public void setContentFingerprint(String contentFingerprint) {
+		this.contentFingerprint = contentFingerprint;
 	}
 }

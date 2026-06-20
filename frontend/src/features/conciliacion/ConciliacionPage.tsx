@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useSearchParams, useLocation } from 'react-router-dom'
 import './conciliacion.css'
 import {
@@ -62,6 +62,7 @@ import {
 import { CounterpartPreviewModal } from './CounterpartPreviewModal'
 import { ManualLinkPreview } from './ManualLinkPreview'
 import { ClassificationCombo } from './ClassificationCombo'
+import { FullLedgerView } from './FullLedgerView'
 import { RubroGroupsView } from './RubroGroupsView'
 import {
   findDuplicateSiblings,
@@ -72,6 +73,9 @@ import {
 import { SessionCheckpointsSection } from './SessionCheckpointsSection'
 import { SessionDisplayNameEditor, SessionHistoryList } from './SessionHistoryList'
 import { SessionSourceFiles } from './SessionSourceFiles'
+import { SessionReimportPanel } from './SessionReimportPanel'
+import { SessionDeferredPanels } from './SessionDeferredPanels'
+import { deferMovement } from './api/deferred'
 import { ShareInChatButton } from './ShareInChatButton'
 import { UnlinkPairButton } from './UnlinkPairButton'
 import {
@@ -81,6 +85,11 @@ import {
   shareRefToRowKey,
   type ConciliacionFocusNavState,
 } from './utils/shareLink'
+import {
+  comparisonRowHasDeferredOrigin,
+  deferredOriginTitle,
+  hasDeferredOrigin,
+} from './utils/deferredOrigin'
 
 const AMOUNT_TOLERANCE_ARROW_STEP = 0.01
 
@@ -205,6 +214,22 @@ function ClassicViewHelpText() {
     <>
       Mismos filtros que en Comparativa: tipo de fila, búsqueda (ID, ref., importe), clasificación y
       fechas; las tres tablas muestran solo lo que cumple todos los criterios activos.
+    </>
+  )
+}
+
+function LedgerViewHelpText() {
+  return (
+    <>
+      <p>
+        Todos los movimientos importados, sin agrupar por rubro ni clasificación: banco a la izquierda,
+        empresa a la derecha. Cada columna tiene <strong>scroll independiente</strong>.
+      </p>
+      <p>
+        En cada fila ves <strong>par</strong> si está conciliado (abrís el emparejamiento) o{' '}
+        <strong>pend.</strong> si falta vincular. Tocá un pendiente en cada lado para conciliar
+        manualmente, igual que al expandir un grupo en la vista por rubro.
+      </p>
     </>
   )
 }
@@ -539,11 +564,12 @@ function pairEstadoMeta(
   bank: MovimientoDto,
   company: MovimientoDto,
   sessionTolerance: number | null | undefined,
-): { label: string; badgeClass: string } {
+): { label: string; abbr: string; badgeClass: string } {
   const k = effectivePairKindFromAmounts(bank.amount, company.amount, sessionTolerance)
   if (k === 'OPPOSITE_SIGN') {
     return {
       label: 'Signo incorrecto',
+      abbr: 'SI',
       badgeClass: 'compare-badge compare-badge--estado compare-badge--opp-sign',
     }
   }
@@ -553,6 +579,7 @@ function pairEstadoMeta(
         pair.matchSource === 'MANUAL'
           ? 'Diferencia de importe (vínculo manual)'
           : 'Diferencia de importe',
+      abbr: pair.matchSource === 'MANUAL' ? 'ΔM' : 'ΔI',
       badgeClass: 'compare-badge compare-badge--estado compare-badge--amount-gap',
     }
   }
@@ -562,17 +589,20 @@ function pairEstadoMeta(
         pair.matchSource === 'MANUAL'
           ? 'Conciliado con ajuste (manual)'
           : 'Conciliado con ajuste (Δ dentro de tolerancia)',
+      abbr: pair.matchSource === 'MANUAL' ? 'AjM' : 'Aj',
       badgeClass: 'compare-badge compare-badge--estado compare-badge--amount-gap',
     }
   }
   if (pair.matchSource === 'MANUAL') {
     return {
       label: 'Conciliado manual',
+      abbr: 'CM',
       badgeClass: 'compare-badge compare-badge--estado compare-badge--manual',
     }
   }
   return {
     label: 'Conciliado',
+    abbr: 'CA',
     badgeClass: 'compare-badge compare-badge--estado compare-badge--auto',
   }
 }
@@ -1124,6 +1154,9 @@ function rowMatchesFilter(
     }
     return false
   }
+  if (f === 'deferred-in') {
+    return comparisonRowHasDeferredOrigin(row)
+  }
   if (row.kind === 'pair') {
     if (f === 'auto') return row.pair.matchSource !== 'MANUAL'
     if (f === 'manual') return row.pair.matchSource === 'MANUAL'
@@ -1191,7 +1224,9 @@ function compareFilterCounts(
   let oppositeSign = 0
   let fuzzy = 0
   let duplicate = 0
+  let deferredIn = 0
   for (const r of rows) {
+    if (comparisonRowHasDeferredOrigin(r)) deferredIn += 1
     if (r.kind === 'pair') {
       if (r.pair.matchSource === 'MANUAL') manual += 1
       else auto += 1
@@ -1218,6 +1253,7 @@ function compareFilterCounts(
     oppositeSign,
     fuzzy,
     duplicate,
+    deferredIn,
   }
 }
 
@@ -1294,6 +1330,13 @@ function ComparisonLegend({
       count: counts.duplicate,
       title: 'Pendientes marcados como duplicado (misma fecha e importe)',
     },
+    {
+      id: 'deferred-in',
+      label: 'Incorporado dif.',
+      swatch: 'compare-swatch--deferred-in',
+      count: counts.deferredIn,
+      title: 'Movimientos incorporados desde diferidos de otro período',
+    },
   ]
 
   return (
@@ -1346,6 +1389,44 @@ function ConversationBubbleIcon({ className }: { className?: string }) {
         strokeLinejoin="round"
       />
     </svg>
+  )
+}
+
+function PendingDeferButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      className="comment-thread-btn defer-thread-btn"
+      onClick={onClick}
+      title="Diferir a próxima conciliación"
+      aria-label="Diferir a próxima conciliación"
+    >
+      <svg className="comment-thread-svg" viewBox="0 0 24 24" fill="none" aria-hidden>
+        <rect
+          x="3"
+          y="5"
+          width="13"
+          height="14"
+          rx="1.5"
+          stroke="currentColor"
+          strokeWidth="1.75"
+        />
+        <path d="M3 9.5h13" stroke="currentColor" strokeWidth="1.75" />
+        <path
+          d="M7 3v3.5M12 3v3.5"
+          stroke="currentColor"
+          strokeWidth="1.75"
+          strokeLinecap="round"
+        />
+        <path
+          d="M18.5 12h3M20.5 10l2 2-2 2"
+          stroke="currentColor"
+          strokeWidth="1.75"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    </button>
   )
 }
 
@@ -2314,6 +2395,53 @@ function PendingCommentsModal({
   )
 }
 
+function DeferredOriginChips({ movements }: { movements: MovimientoDto[] }) {
+  const withOrigin = movements.filter(hasDeferredOrigin)
+  if (withOrigin.length === 0) return null
+  return (
+    <>
+      {withOrigin.map((m) => (
+        <CompareEstadoChip
+          key={`dif-${m.id}`}
+          abbr="Dif←"
+          title={deferredOriginTitle(m)}
+          className="compare-badge compare-badge--estado compare-badge--deferred-in"
+        />
+      ))}
+    </>
+  )
+}
+
+function CompareEstadoChips({ children }: { children: ReactNode }) {
+  return <div className="compare-estado-chips">{children}</div>
+}
+
+function CompareEstadoChip({
+  abbr,
+  title,
+  className,
+  onClick,
+}: {
+  abbr: string
+  title: string
+  className: string
+  onClick?: () => void
+}) {
+  const cls = `${className} compare-estado-chip${onClick ? ' compare-hint-btn' : ''}`
+  if (onClick) {
+    return (
+      <button type="button" className={cls} title={title} aria-label={title} onClick={onClick}>
+        {abbr}
+      </button>
+    )
+  }
+  return (
+    <span className={cls} title={title} aria-label={title}>
+      {abbr}
+    </span>
+  )
+}
+
 function PendingHintBadges({
   m,
   side,
@@ -2325,27 +2453,25 @@ function PendingHintBadges({
 }) {
   const fuzzyLabel = fuzzyMatchBadgeLabel(m)
   if (!m.duplicateInFile && !fuzzyLabel) return null
+  const fuzzyTitle =
+    m.fuzzyHint?.trim() || fuzzyLabel || 'Posible match — Ver candidato y vincular'
   return (
     <>
       {m.duplicateInFile ? (
-        <button
-          type="button"
-          className="compare-badge compare-badge--estado compare-badge--dup compare-hint-btn"
-          title="Ver otros movimientos con la misma fecha e importe"
+        <CompareEstadoChip
+          abbr="Dup"
+          title="Duplicado — Ver otros movimientos con la misma fecha e importe"
+          className="compare-badge compare-badge--estado compare-badge--dup"
           onClick={() => onInspect?.({ mode: 'duplicate', side, mov: m })}
-        >
-          Duplicado
-        </button>
+        />
       ) : null}
       {fuzzyLabel ? (
-        <button
-          type="button"
-          className="compare-badge compare-badge--estado compare-badge--fuzzy compare-hint-btn"
-          title={m.fuzzyHint ?? 'Ver candidato y vincular'}
+        <CompareEstadoChip
+          abbr="PM"
+          title={fuzzyTitle}
+          className="compare-badge compare-badge--estado compare-badge--fuzzy"
           onClick={() => onInspect?.({ mode: 'fuzzy', side, mov: m })}
-        >
-          {fuzzyLabel}
-        </button>
+        />
       ) : null}
     </>
   )
@@ -2367,6 +2493,7 @@ function ComparisonTable({
   onOpenPendingComments,
   onOpenPendingAttachments,
   onInspectCounterpart,
+  onDeferMovement,
 }: {
   rows: ComparisonRow[]
   /** Total sin filtrar; si es 0 la sesión está vacía. */
@@ -2392,6 +2519,8 @@ function ComparisonTable({
   onOpenPendingAttachments?: (target: PendingAttachmentTarget) => void
   /** Posible match / duplicado: comparar y vincular. */
   onInspectCounterpart?: (req: CounterpartInspectRequest) => void
+  /** Diferir pendiente a la bolsa para la próxima conciliación. */
+  onDeferMovement?: (side: 'bank' | 'company', txId: number) => void
 }) {
   return (
     <div className="table-wrap compare-table-wrap table-wrap--scrollY">
@@ -2404,7 +2533,7 @@ function ComparisonTable({
             <th rowSpan={2} className="compare-th-tipo">
               Estado
             </th>
-            <th colSpan={4} className="compare-th-group">
+            <th colSpan={4} className="compare-th-group compare-th-group--bank">
               Banco
             </th>
             <th colSpan={4} className="compare-th-group">
@@ -2416,7 +2545,7 @@ function ComparisonTable({
             <th rowSpan={2} className="compare-th-clasif">
               Clasif.
             </th>
-            <th rowSpan={2} className="compare-th-notes" scope="col" title="Comentarios y adjuntos (par o pendiente)">
+            <th rowSpan={2} className="compare-th-notes" scope="col" title="Notas, adjuntos y diferir a próxima conciliación">
               Notas
             </th>
             <th rowSpan={2}></th>
@@ -2425,7 +2554,7 @@ function ComparisonTable({
             <th>ID</th>
             <th>Fecha</th>
             <th>Importe</th>
-            <th>Ref. / desc.</th>
+            <th className="compare-th-split-edge">Ref. / desc.</th>
             <th>ID</th>
             <th>Fecha</th>
             <th>Importe</th>
@@ -2458,16 +2587,25 @@ function ComparisonTable({
                   <tr key={row.key} data-row-key={row.key} className={cls}>
                     <td className="rownum-td">{idx + 1}</td>
                     <td className="compare-td-tipo">
-                      <span className={estado.badgeClass}>{estado.label}</span>
+                      <CompareEstadoChips>
+                        <CompareEstadoChip
+                          abbr={estado.abbr}
+                          title={estado.label}
+                          className={estado.badgeClass}
+                        />
+                        <DeferredOriginChips movements={[bank, company]} />
+                      </CompareEstadoChips>
                     </td>
                     <td>{bank.id}</td>
                     <td className="cell-date-nowrap">{formatDisplayDate(bank.txDate)}</td>
                     <td>{bank.amount}</td>
-                    <td className="cell-desc">
+                    <td className="compare-td-split-edge cell-desc">
                       {[bank.reference, bank.description].filter(Boolean).join(' · ') || '—'}
                     </td>
                     <td>{company.id}</td>
-                    <td className="cell-date-nowrap">{formatDisplayDate(company.txDate)}</td>
+                    <td className="cell-date-nowrap">
+                      {formatDisplayDate(company.txDate)}
+                    </td>
                     <td>{company.amount}</td>
                     <td className="cell-desc">
                       {[company.reference, company.description].filter(Boolean).join(' · ') ||
@@ -2532,18 +2670,23 @@ function ComparisonTable({
                   <tr key={row.key} data-row-key={row.key} className={cls}>
                     <td className="rownum-td">{idx + 1}</td>
                     <td className="compare-td-tipo compare-td-tipo--stack">
-                      <span className="compare-badge compare-badge--estado compare-badge--warn">
-                        Pendiente banco
-                      </span>
-                      <PendingHintBadges m={m} side="bank" onInspect={onInspectCounterpart} />
+                      <CompareEstadoChips>
+                        <CompareEstadoChip
+                          abbr="PB"
+                          title="Pendiente banco"
+                          className="compare-badge compare-badge--estado compare-badge--warn"
+                        />
+                        <PendingHintBadges m={m} side="bank" onInspect={onInspectCounterpart} />
+                        <DeferredOriginChips movements={[m]} />
+                      </CompareEstadoChips>
                     </td>
                     <td>{m.id}</td>
                     <td className="cell-date-nowrap">{formatDisplayDate(m.txDate)}</td>
                     <td>{m.amount}</td>
-                    <td className="cell-desc">
+                    <td className="compare-td-split-edge cell-desc">
                       {[m.reference, m.description].filter(Boolean).join(' · ') || '—'}
                     </td>
-                    <td colSpan={4} className="compare-muted">
+                    <td colSpan={4} className="compare-td-split-start compare-muted">
                       —
                     </td>
                     <td className="compare-muted">—</td>
@@ -2575,6 +2718,9 @@ function ComparisonTable({
                           />
                         ) : null}
                         {shareRef ? <ShareInChatButton shareRef={shareRef} /> : null}
+                        {onDeferMovement ? (
+                          <PendingDeferButton onClick={() => onDeferMovement('bank', m.id)} />
+                        ) : null}
                       </div>
                     </td>
                     <td className="compare-muted">—</td>
@@ -2586,12 +2732,17 @@ function ComparisonTable({
                 <tr key={row.key} data-row-key={row.key} className={cls}>
                   <td className="rownum-td">{idx + 1}</td>
                   <td className="compare-td-tipo compare-td-tipo--stack">
-                    <span className="compare-badge compare-badge--estado compare-badge--company">
-                      Pendiente empresa
-                    </span>
-                    <PendingHintBadges m={m} side="company" onInspect={onInspectCounterpart} />
+                    <CompareEstadoChips>
+                      <CompareEstadoChip
+                        abbr="PE"
+                        title="Pendiente empresa"
+                        className="compare-badge compare-badge--estado compare-badge--company"
+                      />
+                      <PendingHintBadges m={m} side="company" onInspect={onInspectCounterpart} />
+                      <DeferredOriginChips movements={[m]} />
+                    </CompareEstadoChips>
                   </td>
-                  <td colSpan={4} className="compare-muted">
+                  <td colSpan={4} className="compare-td-split-edge compare-muted">
                     —
                   </td>
                   <td>{m.id}</td>
@@ -2629,6 +2780,9 @@ function ComparisonTable({
                         />
                       ) : null}
                       {shareRef ? <ShareInChatButton shareRef={shareRef} /> : null}
+                      {onDeferMovement ? (
+                        <PendingDeferButton onClick={() => onDeferMovement('company', m.id)} />
+                      ) : null}
                     </div>
                   </td>
                   <td className="compare-muted">—</td>
@@ -2668,6 +2822,9 @@ function CompleteViewLegendStatic() {
       </span>
       <span className="complete-legend-item">
         <span className="compare-swatch compare-swatch--duplicate" aria-hidden /> Duplicado
+      </span>
+      <span className="complete-legend-item">
+        <span className="compare-swatch compare-swatch--deferred-in" aria-hidden /> Incorporado dif.
       </span>
     </div>
   )
@@ -2838,9 +2995,9 @@ export default function ConciliacionPage() {
   const [activityLoading, setActivityLoading] = useState(false)
   const [activityError, setActivityError] = useState<string | null>(null)
 
-  const [detailLayout, setDetailLayout] = useState<'classic' | 'compare' | 'complete' | 'rubro'>(
-    'compare',
-  )
+  const [detailLayout, setDetailLayout] = useState<
+    'classic' | 'compare' | 'complete' | 'rubro' | 'ledger'
+  >('compare')
   const [compareFilter, setCompareFilter] = useState<CompareFilterKind>('all')
   const [compareDateFrom, setCompareDateFrom] = useState('')
   const [compareDateTo, setCompareDateTo] = useState('')
@@ -3304,6 +3461,14 @@ export default function ConciliacionPage() {
         ...raw,
         bankFileCount: typeof raw.bankFileCount === 'number' ? raw.bankFileCount : 1,
         companyFileCount: typeof raw.companyFileCount === 'number' ? raw.companyFileCount : 1,
+        bankFileSummaries:
+          raw.bankFileSummaries?.length > 0
+            ? raw.bankFileSummaries
+            : [{ fileName: raw.sourceBankFileName, rowCount: raw.bankRows }],
+        companyFileSummaries:
+          raw.companyFileSummaries?.length > 0
+            ? raw.companyFileSummaries
+            : [{ fileName: raw.sourceCompanyFileName, rowCount: raw.companyRows }],
       })
     } catch (err) {
       setImportError(err instanceof Error ? err.message : String(err))
@@ -3382,6 +3547,24 @@ export default function ConciliacionPage() {
     } catch (e) {
       setManualError(e instanceof Error ? e.message : String(e))
       return false
+    }
+  }
+
+  async function handleDeferMovement(side: 'bank' | 'company', txId: number) {
+    if (selectedId == null || classificationReadOnly) return
+    if (
+      !window.confirm(
+        '¿Diferir este movimiento a la próxima conciliación?\n\nDejará de figurar como pendiente en esta sesión y quedará guardado para incorporarlo en el próximo período.',
+      )
+    ) {
+      return
+    }
+    try {
+      await deferMovement(selectedId, side, txId)
+      await loadDetail(selectedId, { soft: true })
+      await loadSessionListPage(sessionListPage)
+    } catch (e) {
+      setManualError(e instanceof Error ? e.message : String(e))
     }
   }
 
@@ -4131,30 +4314,40 @@ export default function ConciliacionPage() {
               <h3 className="import-result-title">Sesión {importResult.sessionId}</h3>
               <div className="import-result-grid">
                 <div className="import-result-cell">
-                  <span className="import-result-k">Filas banco</span>
+                  <span className="import-result-k">Total filas banco</span>
                   <span className="import-result-v">{importResult.bankRows}</span>
                 </div>
                 <div className="import-result-cell">
-                  <span className="import-result-k">Filas plataforma</span>
+                  <span className="import-result-k">Total filas plataforma</span>
                   <span className="import-result-v">{importResult.companyRows}</span>
                 </div>
-                <div className="import-result-cell">
-                  <span className="import-result-k">
-                    Archivos banco
-                    {importResult.bankFileCount > 1 ? ` (${importResult.bankFileCount})` : ''}
-                  </span>
-                  <span className="import-result-v" title={importResult.sourceBankFileName}>
-                    {importResult.sourceBankFileName}
-                  </span>
+              </div>
+              <div className="import-result-files">
+                <div className="import-result-files-group">
+                  <span className="import-result-k">Banco — filas por archivo</span>
+                  <ul className="import-result-file-list">
+                    {importResult.bankFileSummaries.map((f, idx) => (
+                      <li key={`bank-${f.fileName}-${idx}`} className="import-result-file-item">
+                        <span className="import-result-file-name" title={f.fileName}>
+                          {f.fileName}
+                        </span>
+                        <span className="import-result-file-count">{f.rowCount} filas</span>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
-                <div className="import-result-cell">
-                  <span className="import-result-k">
-                    Archivos plataforma
-                    {importResult.companyFileCount > 1 ? ` (${importResult.companyFileCount})` : ''}
-                  </span>
-                  <span className="import-result-v" title={importResult.sourceCompanyFileName}>
-                    {importResult.sourceCompanyFileName}
-                  </span>
+                <div className="import-result-files-group">
+                  <span className="import-result-k">Plataforma — filas por archivo</span>
+                  <ul className="import-result-file-list">
+                    {importResult.companyFileSummaries.map((f, idx) => (
+                      <li key={`company-${f.fileName}-${idx}`} className="import-result-file-item">
+                        <span className="import-result-file-name" title={f.fileName}>
+                          {f.fileName}
+                        </span>
+                        <span className="import-result-file-count">{f.rowCount} filas</span>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               </div>
             </div>
@@ -4291,8 +4484,60 @@ export default function ConciliacionPage() {
                   <SessionSourceFiles
                     bankFileName={detail.session.sourceBankFileName}
                     companyFileName={detail.session.sourceCompanyFileName}
+                    bankFileSummaries={detail.session.bankFileSummaries}
+                    companyFileSummaries={detail.session.companyFileSummaries}
                     variant="detail"
                   />
+                  {selectedId != null && !classificationReadOnly && (
+                    <section className="session-reimport-section" aria-label="Actualizar archivos importados">
+                      <div className="session-reimport-section-head">
+                        <span className="session-reimport-section-eyebrow">Actualización incremental</span>
+                        <p className="session-reimport-section-lead">
+                          Reemplazá un lado con el Excel completo actualizado. El otro lado de la sesión no se
+                          modifica.
+                        </p>
+                      </div>
+                      <div className="session-reimport-grid">
+                        <SessionReimportPanel
+                          sessionId={selectedId}
+                          side="bank"
+                          readOnly={classificationReadOnly}
+                          useCustomImportLayout={useCustomImportLayout}
+                          bankLayoutExcel={importBankLayoutExcel}
+                          companyLayoutExcel={importCompanyLayoutExcel}
+                          onApplied={async () => {
+                            await loadDetail(selectedId, { soft: true })
+                            await loadSessionListPage(sessionListPage)
+                          }}
+                        />
+                        <SessionReimportPanel
+                          sessionId={selectedId}
+                          side="company"
+                          readOnly={classificationReadOnly}
+                          useCustomImportLayout={useCustomImportLayout}
+                          bankLayoutExcel={importBankLayoutExcel}
+                          companyLayoutExcel={importCompanyLayoutExcel}
+                          onApplied={async () => {
+                            await loadDetail(selectedId, { soft: true })
+                            await loadSessionListPage(sessionListPage)
+                          }}
+                        />
+                      </div>
+                    </section>
+                  )}
+                  {selectedId != null && detail ? (
+                    <SessionDeferredPanels
+                      sessionId={selectedId}
+                      deferredFromSession={detail.deferredFromSession ?? []}
+                      deferredIntoSession={detail.deferredIntoSession ?? []}
+                      availableDeferredCount={detail.availableDeferredCount ?? 0}
+                      readOnly={classificationReadOnly}
+                      onChanged={async () => {
+                        await loadDetail(selectedId, { soft: true })
+                        await loadSessionListPage(sessionListPage)
+                      }}
+                    />
+                  ) : null}
                 </div>
               )}
 
@@ -4445,6 +4690,15 @@ export default function ConciliacionPage() {
                   <button
                     type="button"
                     role="tab"
+                    aria-selected={detailLayout === 'ledger'}
+                    className="detail-view-tab"
+                    onClick={() => setDetailLayout('ledger')}
+                  >
+                    Por archivo
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
                     aria-selected={detailLayout === 'complete'}
                     className="detail-view-tab"
                     onClick={() => setDetailLayout('complete')}
@@ -4518,6 +4772,70 @@ export default function ConciliacionPage() {
                     onOpenPendingComments={(t) => setCommentTarget(t)}
                     onOpenPendingAttachments={(t) => setAttachmentTarget(t)}
                     onInspectCounterpart={(req) => setCounterpartInspect(req)}
+                    onDeferMovement={
+                      classificationReadOnly ? undefined : (side, txId) => void handleDeferMovement(side, txId)
+                    }
+                  />
+                </>
+              ) : detailLayout === 'rubro' ? (
+                <>
+                  <SubsectionTitleRow
+                    help={<RubroViewHelpText />}
+                    helpAriaLabel="Ayuda sobre la vista por rubro"
+                    helpDialogLabel="Ayuda de la vista por rubro"
+                  >
+                    Vista por rubro
+                  </SubsectionTitleRow>
+                  <RubroGroupsView
+                    detail={detail}
+                    sessionAmountTolerance={effectiveSessionAmountTolerance}
+                    reconcileLocked={reconcileLocked}
+                    manualLinkLoading={manualLoading}
+                    manualLinkError={manualError}
+                    classificationReadOnly={classificationReadOnly}
+                    classificationSuggestions={classificationSuggestions}
+                    onSetClassification={(side, txId, c) => void handleSetClassification(side, txId, c)}
+                    onSetPairClassification={(pairId, c) => void handleSetPairClassification(pairId, c)}
+                    onManualPair={
+                      reconcileLocked
+                        ? undefined
+                        : (bankId, companyId) => void handleManualPairIds(bankId, companyId)
+                    }
+                    onScrollToComparisonRow={(rowKey) => {
+                      setDetailLayout('compare')
+                      requestAnimationFrame(() => scrollToComparisonRow(rowKey))
+                    }}
+                    onUnlinkPair={
+                      reconcileLocked || classificationReadOnly
+                        ? undefined
+                        : (pairId, matchSource) => handleUnlinkPair(pairId, matchSource)
+                    }
+                  />
+                </>
+              ) : detailLayout === 'ledger' ? (
+                <>
+                  <SubsectionTitleRow
+                    help={<LedgerViewHelpText />}
+                    helpAriaLabel="Ayuda sobre la vista por archivo"
+                    helpDialogLabel="Ayuda de la vista por archivo"
+                  >
+                    Vista por archivo
+                  </SubsectionTitleRow>
+                  <FullLedgerView
+                    detail={detail}
+                    reconcileLocked={reconcileLocked}
+                    manualLinkLoading={manualLoading}
+                    manualLinkError={manualError}
+                    onManualPair={
+                      reconcileLocked
+                        ? undefined
+                        : (bankId, companyId) => void handleManualPairIds(bankId, companyId)
+                    }
+                    onUnlinkPair={
+                      reconcileLocked || classificationReadOnly
+                        ? undefined
+                        : (pairId, matchSource) => handleUnlinkPair(pairId, matchSource)
+                    }
                   />
                 </>
               ) : detailLayout === 'complete' ? (
@@ -4567,40 +4885,8 @@ export default function ConciliacionPage() {
                     onOpenPendingComments={(t) => setCommentTarget(t)}
                     onOpenPendingAttachments={(t) => setAttachmentTarget(t)}
                     onInspectCounterpart={(req) => setCounterpartInspect(req)}
-                  />
-                </>
-              ) : detailLayout === 'rubro' ? (
-                <>
-                  <SubsectionTitleRow
-                    help={<RubroViewHelpText />}
-                    helpAriaLabel="Ayuda sobre la vista por rubro"
-                    helpDialogLabel="Ayuda de la vista por rubro"
-                  >
-                    Vista por rubro
-                  </SubsectionTitleRow>
-                  <RubroGroupsView
-                    detail={detail}
-                    sessionAmountTolerance={effectiveSessionAmountTolerance}
-                    reconcileLocked={reconcileLocked}
-                    manualLinkLoading={manualLoading}
-                    manualLinkError={manualError}
-                    classificationReadOnly={classificationReadOnly}
-                    classificationSuggestions={classificationSuggestions}
-                    onSetClassification={(side, txId, c) => void handleSetClassification(side, txId, c)}
-                    onSetPairClassification={(pairId, c) => void handleSetPairClassification(pairId, c)}
-                    onManualPair={
-                      reconcileLocked
-                        ? undefined
-                        : (bankId, companyId) => void handleManualPairIds(bankId, companyId)
-                    }
-                    onScrollToComparisonRow={(rowKey) => {
-                      setDetailLayout('compare')
-                      requestAnimationFrame(() => scrollToComparisonRow(rowKey))
-                    }}
-                    onUnlinkPair={
-                      reconcileLocked || classificationReadOnly
-                        ? undefined
-                        : (pairId, matchSource) => handleUnlinkPair(pairId, matchSource)
+                    onDeferMovement={
+                      classificationReadOnly ? undefined : (side, txId) => void handleDeferMovement(side, txId)
                     }
                   />
                 </>

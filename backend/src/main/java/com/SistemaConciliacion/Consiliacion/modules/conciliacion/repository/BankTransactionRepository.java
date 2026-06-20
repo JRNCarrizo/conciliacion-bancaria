@@ -14,5 +14,7 @@ public interface BankTransactionRepository extends JpaRepository<BankTransaction
 	long countBySession_Id(Long sessionId);
 
 	Optional<BankTransaction> findByIdAndSession_Id(Long id, Long sessionId);
+
+	boolean existsBySession_IdAndContentFingerprint(Long sessionId, String contentFingerprint);
 }
 

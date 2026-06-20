@@ -2,8 +2,13 @@ package com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.ImportFileSummaryDto;
 
 import jakarta.persistence.Column;
+import jakarta.persistence.Convert;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
@@ -29,6 +34,14 @@ public class ReconciliationSession {
 
 	@Column(name = "source_company_file_name")
 	private String sourceCompanyFileName;
+
+	@Convert(converter = ImportFileSummaryListConverter.class)
+	@Column(name = "bank_import_file_summaries", columnDefinition = "TEXT")
+	private List<ImportFileSummaryDto> bankImportFileSummaries = new ArrayList<>();
+
+	@Convert(converter = ImportFileSummaryListConverter.class)
+	@Column(name = "company_import_file_summaries", columnDefinition = "TEXT")
+	private List<ImportFileSummaryDto> companyImportFileSummaries = new ArrayList<>();
 
 	/** Nombre legible opcional (ej. «Octubre 2025»). */
 	@Column(name = "display_name", length = 120)
@@ -94,6 +107,23 @@ public class ReconciliationSession {
 
 	public void setSourceCompanyFileName(String sourceCompanyFileName) {
 		this.sourceCompanyFileName = sourceCompanyFileName;
+	}
+
+	public List<ImportFileSummaryDto> getBankImportFileSummaries() {
+		return bankImportFileSummaries;
+	}
+
+	public void setBankImportFileSummaries(List<ImportFileSummaryDto> bankImportFileSummaries) {
+		this.bankImportFileSummaries = bankImportFileSummaries != null ? bankImportFileSummaries : new ArrayList<>();
+	}
+
+	public List<ImportFileSummaryDto> getCompanyImportFileSummaries() {
+		return companyImportFileSummaries;
+	}
+
+	public void setCompanyImportFileSummaries(List<ImportFileSummaryDto> companyImportFileSummaries) {
+		this.companyImportFileSummaries = companyImportFileSummaries != null ? companyImportFileSummaries
+				: new ArrayList<>();
 	}
 
 	public String getDisplayName() {

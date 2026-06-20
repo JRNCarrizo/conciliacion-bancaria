@@ -12,6 +12,8 @@ import org.springframework.stereotype.Component;
 
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.BankTransaction;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.ReconciliationSession;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.service.ImportRowSnapshot;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.service.TransactionFingerprint;
 
 @Component
 public class BancoWorkbookParser {
@@ -57,7 +59,31 @@ public class BancoWorkbookParser {
 			bt.setAmount(amt);
 			bt.setReference(ExcelCells.asString(row.getCell(layout.colReference())));
 			bt.setDescription(ExcelCells.asString(row.getCell(layout.colDescription())));
+			bt.setContentFingerprint(TransactionFingerprint.forBank(bt));
 			out.add(bt);
+		}
+		if (out.isEmpty()) {
+			throw new IllegalArgumentException("Archivo de banco: no se importó ningún movimiento (revisá filas y columnas).");
+		}
+		return out;
+	}
+
+	public List<ImportRowSnapshot> parseSnapshots(Sheet sheet, BankGridLayout layout) {
+		assertHeader(sheet, layout);
+		List<ImportRowSnapshot> out = new ArrayList<>();
+		for (int r = layout.firstDataRowIndex(); r <= sheet.getLastRowNum(); r++) {
+			Row row = sheet.getRow(r);
+			if (row == null || isEmptyDataRow(row, layout)) {
+				continue;
+			}
+			LocalDate d = ExcelCells.asLocalDate(row.getCell(layout.colDate()));
+			BigDecimal amt = ExcelCells.asBigDecimal(row.getCell(layout.colAmount()));
+			if (d == null || amt == null || amt.compareTo(BigDecimal.ZERO) == 0) {
+				continue;
+			}
+			String reference = ExcelCells.asString(row.getCell(layout.colReference()));
+			String description = ExcelCells.asString(row.getCell(layout.colDescription()));
+			out.add(ImportRowSnapshot.bank(d, amt, reference, description));
 		}
 		if (out.isEmpty()) {
 			throw new IllegalArgumentException("Archivo de banco: no se importó ningún movimiento (revisá filas y columnas).");

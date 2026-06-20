@@ -1,6 +1,7 @@
 package com.SistemaConciliacion.Consiliacion.modules.conciliacion.service;
 
 import java.util.List;
+import java.util.Optional;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -11,6 +12,7 @@ import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.ManualP
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.BankTransaction;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.CompanyTransaction;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.MatchSource;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.PendingMovementSide;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.ReconciliationPair;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.ReconciliationSession;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.SessionAuditEventType;
@@ -97,5 +99,25 @@ public class ConciliacionManualPairService {
 		reconciliationPairRepository.delete(p);
 		sessionAuditService.append(sessionId, SessionAuditEventType.UNLINK_PAIR,
 				String.format("Par %d · %s · banco %d · empresa %d", pairId, source, bankId, companyId));
+	}
+
+	/**
+	 * Quita el par que contiene el movimiento, si existe. Sin auditoría (p. ej. reimportación en lote).
+	 *
+	 * @return true si se eliminó un par
+	 */
+	@Transactional
+	public boolean unlinkPairForMovementSilent(long sessionId, PendingMovementSide side, long txId) {
+		Optional<ReconciliationPair> found = side == PendingMovementSide.BANK
+				? reconciliationPairRepository.findByBankTransaction_Id(txId)
+				: reconciliationPairRepository.findByCompanyTransaction_Id(txId);
+		if (found.isEmpty() || found.get().getSession().getId() != sessionId) {
+			return false;
+		}
+		ReconciliationPair p = found.get();
+		pairAttachmentService.deleteStoredFilesForPairs(sessionId, List.of(p.getId()));
+		reconciliationPairCommentRepository.deleteByPair_Id(p.getId());
+		reconciliationPairRepository.delete(p);
+		return true;
 	}
 }

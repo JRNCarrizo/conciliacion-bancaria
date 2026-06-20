@@ -275,4 +275,42 @@ export function rubroGroupsSummary(groups: RubroGroupRow[]) {
   }
 }
 
+export function allBankMovementRefs(detail: SessionDetail): RubroMovementRef[] {
+  const pairMap = pairIdByBankTx(detail)
+  return detail.bankTransactions.map((m) => ({
+    side: 'bank',
+    m,
+    pairId: pairMap.get(m.id) ?? null,
+  }))
+}
+
+export function allCompanyMovementRefs(detail: SessionDetail): RubroMovementRef[] {
+  const pairMap = pairIdByCompanyTx(detail)
+  return detail.companyTransactions.map((m) => ({
+    side: 'company',
+    m,
+    pairId: pairMap.get(m.id) ?? null,
+  }))
+}
+
+export function ledgerViewSummary(detail: SessionDetail) {
+  const bank = allBankMovementRefs(detail)
+  const company = allCompanyMovementRefs(detail)
+  const bankPending = bank.filter((i) => i.pairId == null).length
+  const companyPending = company.filter((i) => i.pairId == null).length
+  const bankSum = bank.reduce((s, i) => s + coerceAmount(i.m.amount), 0)
+  const companySum = company.reduce((s, i) => s + coerceAmount(i.m.amount), 0)
+  return {
+    bankCount: bank.length,
+    companyCount: company.length,
+    bankPending,
+    companyPending,
+    bankMatched: bank.length - bankPending,
+    companyMatched: company.length - companyPending,
+    bankSum,
+    companySum,
+    delta: companySum - bankSum,
+  }
+}
+
 export { movementSummaryLine }

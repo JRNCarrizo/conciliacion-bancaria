@@ -7,14 +7,18 @@ import { formatAmount, formatDisplayDate } from './utils/format'
 function MovementCard({
   title,
   m,
+  side,
   highlight,
 }: {
   title: string
   m: MovimientoDto
+  side: 'bank' | 'company'
   highlight?: boolean
 }) {
   return (
-    <div className={`counterpart-card ${highlight ? 'counterpart-card--highlight' : ''}`}>
+    <div
+      className={`counterpart-card counterpart-card--${side} ${highlight ? 'counterpart-card--highlight' : ''}`}
+    >
       <h4 className="counterpart-card-title">{title}</h4>
       <dl className="counterpart-card-dl">
         <div>
@@ -113,19 +117,23 @@ export function CounterpartPreviewModal({
               Comparación sugerida entre pendientes (importe y fecha cercanos). Si es el mismo movimiento,
               vinculá manualmente; si no, cerrá y seguí revisando.
             </p>
-            <div className="counterpart-compare-grid">
+            <div className="counterpart-compare-grid counterpart-compare-grid--split">
               <MovementCard
                 title={side === 'bank' ? 'Banco (esta fila)' : 'Empresa (esta fila)'}
                 m={mov}
+                side={side}
                 highlight
               />
               {counterpart ? (
                 <MovementCard
                   title={side === 'bank' ? 'Empresa (candidato)' : 'Banco (candidato)'}
                   m={counterpart}
+                  side={side === 'bank' ? 'company' : 'bank'}
                 />
               ) : (
-                <div className="counterpart-card counterpart-card--empty">
+                <div
+                  className={`counterpart-card counterpart-card--empty counterpart-card--${side === 'bank' ? 'company' : 'bank'}`}
+                >
                   <p>No se encontró el movimiento candidato (puede haberse vinculado o filtrado).</p>
                 </div>
               )}
@@ -141,6 +149,7 @@ export function CounterpartPreviewModal({
             <MovementCard
               title={side === 'bank' ? 'Banco (esta fila)' : 'Empresa (esta fila)'}
               m={mov}
+              side={side}
               highlight
             />
             {duplicateSiblings.length > 0 ? (
@@ -156,6 +165,7 @@ export function CounterpartPreviewModal({
                             : `Empresa · ID ${s.id}`
                         }
                         m={s}
+                        side={side}
                       />
                       {onScrollToRow ? (
                         <button

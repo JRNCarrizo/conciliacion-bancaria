@@ -5,9 +5,17 @@ import { movementSummaryLine } from './utils/counterpartUtils'
 import { formatAmount, formatDisplayDate } from './utils/format'
 import { UnlinkPairButton } from './UnlinkPairButton'
 
-function MovementCard({ title, m }: { title: string; m: PairPreviewData['bank'] }) {
+function MovementCard({
+  title,
+  m,
+  side,
+}: {
+  title: string
+  m: PairPreviewData['bank']
+  side: 'bank' | 'company'
+}) {
   return (
-    <div className="counterpart-card">
+    <div className={`counterpart-card counterpart-card--${side}`}>
       <h4 className="counterpart-card-title">{title}</h4>
       <dl className="counterpart-card-dl">
         <div>
@@ -89,9 +97,9 @@ export function PairPreviewModal({
             </>
           ) : null}
         </p>
-        <div className="counterpart-compare-grid">
-          <MovementCard title="Banco" m={bank} />
-          <MovementCard title="Empresa" m={company} />
+        <div className="counterpart-compare-grid counterpart-compare-grid--split">
+          <MovementCard title="Banco" m={bank} side="bank" />
+          <MovementCard title="Empresa" m={company} side="company" />
         </div>
         <p className="counterpart-delta">
           Δ (empresa − banco): {formatAmount(delta)}

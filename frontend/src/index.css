@@ -30,6 +30,7 @@ html[data-theme='light'] {
   /* Índigo — brecha Δ importe (ni verde auto ni azul manual ni naranja pend. banco) */
   --compare-amount-gap: rgba(79, 70, 229, 0.26);
   --compare-opp-sign: rgba(220, 38, 38, 0.24);
+  --compare-split: #000;
 }
 
 html[data-theme='dark'] {
@@ -55,6 +56,8 @@ html[data-theme='dark'] {
   /* Índigo — brecha Δ importe */
   --compare-amount-gap: rgba(99, 102, 241, 0.22);
   --compare-opp-sign: rgba(248, 113, 113, 0.18);
+  --compare-split: #fff;
+  --compare-grid: rgba(255, 255, 255, 0.32);
 }
 
 html[data-theme='dark'] #social .button-icon {
