@@ -33,6 +33,8 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.http.ContentDisposition;
 
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.ClassificationUpdateDto;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.CreateReconciliationGroupRequestDto;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.CreateReconciliationGroupResponseDto;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.ImportLayoutDto;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.CommentCreateDto;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.PendingCommentDto;
@@ -57,6 +59,8 @@ import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.Session
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.SessionSummaryDto;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.service.ConciliacionDeferredMovementService;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.service.ConciliacionExportService;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.service.ConciliacionGroupService;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.service.GroupAttachmentService;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.service.ConciliacionExportService.ExportKind;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.service.ConciliacionImportService;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.service.ConciliacionManualPairService;
@@ -88,6 +92,8 @@ public class ConciliacionController {
 	private final SessionAuditService sessionAuditService;
 	private final SessionCheckpointService sessionCheckpointService;
 	private final ConciliacionDeferredMovementService deferredMovementService;
+	private final ConciliacionGroupService conciliacionGroupService;
+	private final GroupAttachmentService groupAttachmentService;
 
 	public ConciliacionController(ConciliacionImportService conciliacionImportService,
 			ConciliacionReimportService conciliacionReimportService,
@@ -99,7 +105,9 @@ public class ConciliacionController {
 			PairAttachmentService pairAttachmentService,
 			SessionAuditService sessionAuditService,
 			SessionCheckpointService sessionCheckpointService,
-			ConciliacionDeferredMovementService deferredMovementService) {
+			ConciliacionDeferredMovementService deferredMovementService,
+			ConciliacionGroupService conciliacionGroupService,
+			GroupAttachmentService groupAttachmentService) {
 		this.conciliacionImportService = conciliacionImportService;
 		this.conciliacionReimportService = conciliacionReimportService;
 		this.conciliacionSessionService = conciliacionSessionService;
@@ -111,6 +119,8 @@ public class ConciliacionController {
 		this.sessionAuditService = sessionAuditService;
 		this.sessionCheckpointService = sessionCheckpointService;
 		this.deferredMovementService = deferredMovementService;
+		this.conciliacionGroupService = conciliacionGroupService;
+		this.groupAttachmentService = groupAttachmentService;
 	}
 
 	@GetMapping("/status")
@@ -417,6 +427,73 @@ public class ConciliacionController {
 	public ResponseEntity<Void> deletePair(@PathVariable long id, @PathVariable long pairId) {
 		conciliacionManualPairService.deletePair(id, pairId);
 		return ResponseEntity.noContent().build();
+	}
+
+	@PreAuthorize("hasAnyRole('ADMIN', 'OPERADOR')")
+	@PostMapping(value = "/sessions/{id}/grupos", consumes = MediaType.APPLICATION_JSON_VALUE)
+	public CreateReconciliationGroupResponseDto createGroup(@PathVariable long id,
+			@RequestBody CreateReconciliationGroupRequestDto body) {
+		return conciliacionGroupService.createGroup(id, body);
+	}
+
+	@PreAuthorize("hasAnyRole('ADMIN', 'OPERADOR')")
+	@DeleteMapping("/sessions/{id}/grupos/{groupId}")
+	public ResponseEntity<Void> deleteGroup(@PathVariable long id, @PathVariable long groupId) {
+		conciliacionGroupService.deleteGroup(id, groupId);
+		return ResponseEntity.noContent().build();
+	}
+
+	/** Clasificación única del grupo conciliado N:M (una por fila de grupo). */
+	@PreAuthorize("hasAnyRole('ADMIN', 'OPERADOR')")
+	@PutMapping(value = "/sessions/{id}/grupos/{groupId}/clasificacion", consumes = MediaType.APPLICATION_JSON_VALUE)
+	@ResponseStatus(HttpStatus.NO_CONTENT)
+	public void putGroupClassification(@PathVariable long id, @PathVariable long groupId,
+			@RequestBody(required = false) ClassificationUpdateDto body) {
+		conciliacionGroupService.putGroupClassification(id, groupId,
+				body != null ? body : new ClassificationUpdateDto(null));
+	}
+
+	@GetMapping("/sessions/{id}/grupos/{groupId}/comentarios")
+	public List<PendingCommentDto> listGroupComments(@PathVariable long id, @PathVariable long groupId) {
+		return conciliacionSessionService.listGroupComments(id, groupId);
+	}
+
+	@PostMapping(value = "/sessions/{id}/grupos/{groupId}/comentarios", consumes = MediaType.APPLICATION_JSON_VALUE)
+	public PendingCommentDto addGroupComment(@PathVariable long id, @PathVariable long groupId,
+			@RequestBody(required = false) CommentCreateDto body) {
+		return conciliacionSessionService.addGroupComment(id, groupId,
+				body != null ? body : new CommentCreateDto(""));
+	}
+
+	@GetMapping("/sessions/{id}/grupos/{groupId}/adjuntos")
+	public List<MovementAttachmentDto> listGroupAttachments(@PathVariable long id, @PathVariable long groupId) {
+		return groupAttachmentService.list(id, groupId);
+	}
+
+	@PostMapping(value = "/sessions/{id}/grupos/{groupId}/adjuntos", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+	public MovementAttachmentDto uploadGroupAttachment(@PathVariable long id, @PathVariable long groupId,
+			@RequestPart("file") MultipartFile file) throws IOException {
+		return groupAttachmentService.upload(id, groupId, file);
+	}
+
+	@GetMapping("/sessions/{id}/grupos/{groupId}/adjuntos/{attachmentId}/archivo")
+	public ResponseEntity<Resource> downloadGroupAttachment(@PathVariable long id, @PathVariable long groupId,
+			@PathVariable long attachmentId) {
+		ResourceWithMeta meta = groupAttachmentService.loadForDownload(id, groupId, attachmentId);
+		ContentDisposition disposition = ContentDisposition.attachment()
+				.filename(meta.downloadFilename(), StandardCharsets.UTF_8)
+				.build();
+		return ResponseEntity.ok()
+				.header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
+				.contentType(MediaType.parseMediaType(meta.contentType()))
+				.body(meta.resource());
+	}
+
+	@DeleteMapping("/sessions/{id}/grupos/{groupId}/adjuntos/{attachmentId}")
+	@ResponseStatus(HttpStatus.NO_CONTENT)
+	public void deleteGroupAttachment(@PathVariable long id, @PathVariable long groupId,
+			@PathVariable long attachmentId) {
+		groupAttachmentService.delete(id, groupId, attachmentId);
 	}
 
 	@GetMapping("/sessions/{id}/pares/{pairId}/adjuntos")

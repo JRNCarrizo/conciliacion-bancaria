@@ -43,6 +43,7 @@ public class ConciliacionDeferredMovementService {
 	private final PendingMovementCommentRepository pendingMovementCommentRepository;
 	private final MovementAttachmentService movementAttachmentService;
 	private final ConciliacionManualPairService manualPairService;
+	private final MovementMatchService movementMatchService;
 	private final SessionAuditService sessionAuditService;
 
 	public ConciliacionDeferredMovementService(ReconciliationSessionRepository sessionRepository,
@@ -53,6 +54,7 @@ public class ConciliacionDeferredMovementService {
 			PendingMovementCommentRepository pendingMovementCommentRepository,
 			MovementAttachmentService movementAttachmentService,
 			ConciliacionManualPairService manualPairService,
+			MovementMatchService movementMatchService,
 			SessionAuditService sessionAuditService) {
 		this.sessionRepository = sessionRepository;
 		this.bankTransactionRepository = bankTransactionRepository;
@@ -62,6 +64,7 @@ public class ConciliacionDeferredMovementService {
 		this.pendingMovementCommentRepository = pendingMovementCommentRepository;
 		this.movementAttachmentService = movementAttachmentService;
 		this.manualPairService = manualPairService;
+		this.movementMatchService = movementMatchService;
 		this.sessionAuditService = sessionAuditService;
 	}
 
@@ -242,17 +245,14 @@ public class ConciliacionDeferredMovementService {
 	}
 
 	private void ensureUnmatched(PendingMovementSide side, long txId) {
-		boolean paired = side == PendingMovementSide.BANK
-				? reconciliationPairRepository.existsByBankTransaction_Id(txId)
-				: reconciliationPairRepository.existsByCompanyTransaction_Id(txId);
-		if (paired) {
+		if (movementMatchService.isTransactionMatched(side, txId)) {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-					"Solo se pueden diferir movimientos pendientes (sin par).");
+					"Solo se pueden diferir movimientos pendientes (sin par ni grupo).");
 		}
 	}
 
 	private void removeBankTransaction(long sessionId, long txId) {
-		manualPairService.unlinkPairForMovementSilent(sessionId, PendingMovementSide.BANK, txId);
+		manualPairService.unlinkAnyForMovementSilent(sessionId, PendingMovementSide.BANK, txId);
 		cleanupMovementArtifacts(sessionId, PendingMovementSide.BANK, txId);
 		BankTransaction tx = bankTransactionRepository.findByIdAndSession_Id(txId, sessionId)
 				.orElseThrow(() -> new IllegalStateException("Movimiento de banco no encontrado: " + txId));
@@ -260,7 +260,7 @@ public class ConciliacionDeferredMovementService {
 	}
 
 	private void removeCompanyTransaction(long sessionId, long txId) {
-		manualPairService.unlinkPairForMovementSilent(sessionId, PendingMovementSide.COMPANY, txId);
+		manualPairService.unlinkAnyForMovementSilent(sessionId, PendingMovementSide.COMPANY, txId);
 		cleanupMovementArtifacts(sessionId, PendingMovementSide.COMPANY, txId);
 		CompanyTransaction tx = companyTransactionRepository.findByIdAndSession_Id(txId, sessionId)
 				.orElseThrow(() -> new IllegalStateException("Movimiento de empresa no encontrado: " + txId));

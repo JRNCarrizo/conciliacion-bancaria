@@ -15,5 +15,8 @@ export function comparisonRowHasDeferredOrigin(row: ComparisonRow): boolean {
   if (row.kind === 'pair') {
     return hasDeferredOrigin(row.bank) || hasDeferredOrigin(row.company)
   }
+  if (row.kind === 'group') {
+    return row.banks.some(hasDeferredOrigin) || row.companies.some(hasDeferredOrigin)
+  }
   return hasDeferredOrigin(row.m)
 }

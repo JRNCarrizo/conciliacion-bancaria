@@ -86,6 +86,8 @@ public class SessionAuditService {
 			case DEFER_MOVEMENT -> "Diferido a próxima conciliación";
 			case INCORPORATE_DEFERRED -> "Incorporó diferidos";
 			case RESTORE_DEFERRED -> "Restauró diferido";
+			case CREATE_GROUP -> "Concilió grupo N:M";
+			case UNLINK_GROUP -> "Desvinculó un grupo";
 		};
 	}
 }

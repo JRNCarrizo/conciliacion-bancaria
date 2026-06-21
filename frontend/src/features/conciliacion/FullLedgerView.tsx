@@ -1,46 +1,60 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { HelpPopoverButton } from './HelpPopoverButton'
 import { MovementMiniTable } from './MovementMiniTable'
 import { PairPreviewModal } from './PairPreviewModal'
-import { RubroLinkConfirmModal, usePendingPairLinkPicker } from './RubroLinkConfirmModal'
+import { PendingLinkSelectionPanel } from './PendingLinkSelectionPanel'
+import { RubroLinkConfirmModal } from './RubroLinkConfirmModal'
+import { useLedgerKeyboardNav } from './useLedgerKeyboardNav'
+import { usePendingMultiLinkPicker } from './usePendingMultiLinkPicker'
 import type { SessionDetail } from './types'
 import { formatAmount } from './utils/format'
 import { resolvePairPreview } from './utils/pairLookup'
 import {
   allBankMovementRefs,
   allCompanyMovementRefs,
+  isRubroMovementLinkable,
   ledgerViewSummary,
 } from './utils/rubroGroups'
 
 export function FullLedgerView({
   detail,
+  sessionAmountTolerance,
   reconcileLocked,
   manualLinkLoading,
   manualLinkError,
   onManualPair,
+  onCreateGroup,
+  onScrollToComparisonRow,
   onUnlinkPair,
+  onUnlinkGroup,
 }: {
   detail: SessionDetail
+  sessionAmountTolerance?: number | null
   reconcileLocked: boolean
   manualLinkLoading: boolean
   manualLinkError: string | null
   onManualPair?: (bankId: number, companyId: number) => void
+  onCreateGroup?: (bankIds: number[], companyIds: number[]) => void | Promise<void>
+  onScrollToComparisonRow?: (rowKey: string) => void
   onUnlinkPair?: (
     pairId: number,
     matchSource: 'MANUAL' | 'AUTO',
   ) => void | boolean | Promise<void | boolean>
+  onUnlinkGroup?: (groupId: number) => void | Promise<void>
 }) {
   const [viewPairId, setViewPairId] = useState<number | null>(null)
+  const [ledgerPairLinkOpen, setLedgerPairLinkOpen] = useState(false)
 
   const bankItems = useMemo(() => allBankMovementRefs(detail), [detail])
   const companyItems = useMemo(() => allCompanyMovementRefs(detail), [detail])
   const summary = useMemo(() => ledgerViewSummary(detail), [detail])
 
-  const linkableBank = useMemo(() => bankItems.filter((i) => i.pairId == null), [bankItems])
-  const linkableCompany = useMemo(() => companyItems.filter((i) => i.pairId == null), [companyItems])
+  const linkableBank = useMemo(() => bankItems.filter(isRubroMovementLinkable), [bankItems])
+  const linkableCompany = useMemo(() => companyItems.filter(isRubroMovementLinkable), [companyItems])
 
   const linkMode =
     !reconcileLocked &&
-    onManualPair != null &&
+    (onManualPair != null || onCreateGroup != null) &&
     linkableBank.length > 0 &&
     linkableCompany.length > 0
 
@@ -55,18 +69,121 @@ export function FullLedgerView({
   )
 
   const {
-    selectedBankId,
-    selectedCompanyId,
+    selectedBankIds,
+    selectedCompanyIds,
+    selectedBank,
+    selectedCompany,
     toggleBank,
     toggleCompany,
-    prompt: linkPrompt,
-    dismissPrompt: dismissLinkPrompt,
-  } = usePendingPairLinkPicker(linkMode, linkableBank, linkableCompany, linkPickerResetKey)
+    clearSelection,
+    bankSum,
+    companySum,
+    delta,
+    hasBank,
+    hasCompany,
+    bothSides,
+    canGroupLink,
+    pairPrompt,
+    hasSelection,
+  } = usePendingMultiLinkPicker(linkMode, linkableBank, linkableCompany, linkPickerResetKey)
 
   const pairPreview = useMemo(
     () => (viewPairId != null ? resolvePairPreview(detail, viewPairId) : null),
     [detail, viewPairId],
   )
+
+  const keyboardBlocked = ledgerPairLinkOpen || pairPreview != null
+
+  const {
+    bankWrapRef,
+    companyWrapRef,
+    focusedTxId,
+    focusedSide,
+    handleTableMouseEnter,
+    handleGridMouseLeave,
+  } = useLedgerKeyboardNav({
+    enabled: bankItems.length > 0 || companyItems.length > 0,
+    bankItems,
+    companyItems,
+    linkMode,
+    toggleBank,
+    toggleCompany,
+    interactionBlocked: keyboardBlocked,
+    resetKey: linkPickerResetKey,
+  })
+
+  useEffect(() => {
+    setLedgerPairLinkOpen(false)
+  }, [linkPickerResetKey])
+
+  useEffect(() => {
+    if (!linkMode) return
+    function onKey(ev: KeyboardEvent) {
+      if (ev.key !== 'Escape') return
+      if (
+        ev.target instanceof HTMLElement &&
+        ev.target.closest('input, textarea, select, [contenteditable="true"]')
+      ) {
+        return
+      }
+      if (document.querySelector('.rubro-link-confirm-backdrop') || pairPreview != null) return
+      if (!hasSelection && focusedTxId == null) return
+      ev.preventDefault()
+      clearSelection()
+      setLedgerPairLinkOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [linkMode, hasSelection, focusedTxId, pairPreview, clearSelection])
+
+  useEffect(() => {
+    if (!linkMode) return
+    function onKey(ev: KeyboardEvent) {
+      if (ev.key !== 'Enter' || ev.repeat) return
+      if (ledgerPairLinkOpen || pairPreview != null) return
+      if (
+        ev.target instanceof HTMLElement &&
+        ev.target.closest('input, textarea, select, [contenteditable="true"]')
+      ) {
+        return
+      }
+      if (!bothSides) return
+      if (canGroupLink && onCreateGroup) {
+        const bankIds = selectedBank.map((i) => i.m.id)
+        const companyIds = selectedCompany.map((i) => i.m.id)
+        const msg =
+          `¿Conciliar grupo con ${bankIds.length} mov. banco y ${companyIds.length} mov. empresa?\n` +
+          `Σ banco ${formatAmount(bankSum)} · Σ empresa ${formatAmount(companySum)}`
+        ev.preventDefault()
+        if (!window.confirm(msg)) return
+        void onCreateGroup(bankIds, companyIds)
+        return
+      }
+      if (pairPrompt && onManualPair) {
+        ev.preventDefault()
+        setLedgerPairLinkOpen(true)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [
+    linkMode,
+    ledgerPairLinkOpen,
+    pairPreview,
+    bothSides,
+    canGroupLink,
+    pairPrompt,
+    onManualPair,
+    onCreateGroup,
+    selectedBank,
+    selectedCompany,
+    bankSum,
+    companySum,
+  ])
+
+  const handleScrollToGroup = (groupId: number) => {
+    onScrollToComparisonRow?.(`group-${groupId}`)
+  }
 
   return (
     <div className="ledger-view">
@@ -93,43 +210,106 @@ export function FullLedgerView({
         </div>
       </div>
 
-      {linkMode ? (
-        <p className="rubro-detail-link-hint ledger-view-link-hint">
-          Elegí un <strong>pend.</strong> en cada columna para vincular manualmente. Cada tabla tiene
-          scroll independiente.
-        </p>
+      {linkMode || (!linkMode && (bankItems.length > 0 || companyItems.length > 0)) ? (
+        <div className="keyboard-hint-anchor keyboard-hint-anchor--ledger">
+          <HelpPopoverButton
+            variant="keyboard"
+            ariaLabel="Atajos de teclado en vista por archivo"
+            dialogLabel="Atajos — vista por archivo"
+          >
+            {linkMode ? (
+              <p className="keyboard-hint-popover-body">
+                Tocá <strong>pend.</strong> o pasá el mouse sobre una tabla: <kbd>↑</kbd> <kbd>↓</kbd>{' '}
+                recorren filas, <kbd>←</kbd> <kbd>→</kbd> cambian de tabla, <kbd>Espacio</kbd>{' '}
+                selecciona pendientes, <kbd>Enter</kbd> confirma el vínculo, <kbd>Esc</kbd> limpia la
+                selección (el foco queda en la tabla).
+              </p>
+            ) : (
+              <p className="keyboard-hint-popover-body">
+                Sobre una tabla: <kbd>↑</kbd> <kbd>↓</kbd> recorren filas; <kbd>←</kbd> <kbd>→</kbd>{' '}
+                pasan al otro lado.
+              </p>
+            )}
+          </HelpPopoverButton>
+        </div>
       ) : reconcileLocked ? (
         <p className="ledger-view-readonly-hint">Sesión cerrada: solo consulta.</p>
       ) : null}
 
-      <div className="ledger-view-grid rubro-detail-grid">
+      {manualLinkError ? <p className="msg err ledger-view-link-err">{manualLinkError}</p> : null}
+
+      <div
+        className="ledger-view-grid rubro-detail-grid"
+        onMouseLeave={handleGridMouseLeave}
+      >
         <MovementMiniTable
           side="bank"
           title={`Extracto banco (${bankItems.length})`}
           items={bankItems}
           linkMode={linkMode}
-          selectedTxId={selectedBankId}
+          selectedTxIds={linkMode ? selectedBankIds : undefined}
           onToggleTxId={linkMode ? toggleBank : undefined}
           onViewPair={setViewPairId}
+          onScrollToGroup={handleScrollToGroup}
+          onUnlinkGroup={onUnlinkGroup}
+          tableWrapRef={bankWrapRef}
+          keyboardNav={{
+            focusedTxId,
+            tableActive: focusedSide === 'bank',
+          }}
+          onTableMouseEnter={() => handleTableMouseEnter('bank')}
         />
         <MovementMiniTable
           side="company"
           title={`Libro empresa (${companyItems.length})`}
           items={companyItems}
           linkMode={linkMode}
-          selectedTxId={selectedCompanyId}
+          selectedTxIds={linkMode ? selectedCompanyIds : undefined}
           onToggleTxId={linkMode ? toggleCompany : undefined}
           onViewPair={setViewPairId}
+          onScrollToGroup={handleScrollToGroup}
+          onUnlinkGroup={onUnlinkGroup}
+          tableWrapRef={companyWrapRef}
+          keyboardNav={{
+            focusedTxId,
+            tableActive: focusedSide === 'company',
+          }}
+          onTableMouseEnter={() => handleTableMouseEnter('company')}
         />
       </div>
 
-      {linkPrompt && onManualPair ? (
+      {linkMode && hasSelection ? (
+        <PendingLinkSelectionPanel
+          selectedBank={selectedBank}
+          selectedCompany={selectedCompany}
+          bankSum={bankSum}
+          companySum={companySum}
+          delta={delta}
+          hasBank={hasBank}
+          hasCompany={hasCompany}
+          bothSides={bothSides}
+          canGroupLink={canGroupLink}
+          manualLinkLoading={manualLinkLoading}
+          sessionAmountTolerance={sessionAmountTolerance}
+          enterHint
+          showSelectionTables
+          onViewPair={setViewPairId}
+          onClear={clearSelection}
+          onCreateGroup={onCreateGroup}
+          onConfirmPairLink={onManualPair ? () => setLedgerPairLinkOpen(true) : undefined}
+        />
+      ) : null}
+
+      {ledgerPairLinkOpen && pairPrompt && onManualPair ? (
         <RubroLinkConfirmModal
-          prompt={linkPrompt}
+          prompt={pairPrompt}
           loading={manualLinkLoading}
           error={manualLinkError}
-          onCancel={dismissLinkPrompt}
-          onConfirm={() => onManualPair(linkPrompt.bankId, linkPrompt.companyId)}
+          onCancel={() => setLedgerPairLinkOpen(false)}
+          onConfirm={() => {
+            void onManualPair(pairPrompt.bankId, pairPrompt.companyId)
+            setLedgerPairLinkOpen(false)
+          }}
         />
       ) : null}
 

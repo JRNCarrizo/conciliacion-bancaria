@@ -10,7 +10,7 @@ import java.util.List;
  * redondeo). {@code adjustedBalanceFromBank} = saldo final extracto + Σ pendientes empresa − Σ
  * pendientes banco (control contable cuando hay saldo final de extracto).
  */
-public record ConciliacionStatsDto(long bankRowCount, long companyRowCount, long matchedPairs,
+public record ConciliacionStatsDto(long bankRowCount, long companyRowCount, long matchedPairs, long matchedGroups,
 		long unmatchedBankCount, long unmatchedCompanyCount, BigDecimal sumBank, BigDecimal sumCompany,
 		BigDecimal differenceTotal, BigDecimal sumReconciledBank, BigDecimal sumReconciledCompany,
 		BigDecimal sumPendingBank, BigDecimal sumPendingCompany, BigDecimal pctRowsReconciledBank,

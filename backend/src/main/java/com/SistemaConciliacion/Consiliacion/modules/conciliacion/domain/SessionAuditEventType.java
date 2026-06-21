@@ -22,5 +22,9 @@ public enum SessionAuditEventType {
 	/** Diferidos incorporados desde períodos anteriores. */
 	INCORPORATE_DEFERRED,
 	/** Diferido devuelto a pendientes de la sesión origen. */
-	RESTORE_DEFERRED
+	RESTORE_DEFERRED,
+	/** Vínculo N:M manual entre movimientos de banco y empresa. */
+	CREATE_GROUP,
+	/** Se deshace un grupo N:M; los movimientos vuelven a pendientes. */
+	UNLINK_GROUP
 }

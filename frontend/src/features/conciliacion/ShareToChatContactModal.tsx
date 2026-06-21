@@ -68,39 +68,52 @@ export function ShareToChatContactModal({
         aria-labelledby="share-chat-title"
         onClick={(ev) => ev.stopPropagation()}
       >
-        <header className="comment-modal-head">
+        <header className="comment-modal-head share-chat-modal-head">
           <h3 id="share-chat-title">Compartir en chat</h3>
           <button type="button" className="comment-modal-close" onClick={onClose} aria-label="Cerrar">
             ×
           </button>
         </header>
-        <p className="comment-modal-hint share-chat-preview-label">{shareRef.label}</p>
-        {shareRef.detail ? (
-          <p className="comment-modal-hint share-chat-preview-detail">{shareRef.detail}</p>
-        ) : null}
-        <p className="comment-modal-hint">
-          Elegí a quién enviarlo. Se abrirá el chat con esta referencia; podés agregar un mensaje y
-          enviar.
-        </p>
-        {loading ? <p className="msg subtle">Cargando contactos…</p> : null}
-        {error ? <p className="msg err">{error}</p> : null}
-        {!loading && !error && contacts.length === 0 ? (
-          <p className="msg subtle">No hay otros usuarios para escribir.</p>
-        ) : null}
-        {!loading && !error && contacts.length > 0 ? (
-          <ul className="share-chat-contact-list">
-            {contacts.map((c) => (
-              <li key={c.id}>
-                <button type="button" className="share-chat-contact-row" onClick={() => pick(c)}>
-                  <span>{c.username}</span>
-                  {c.unreadCount > 0 ? (
-                    <span className="chat-drawer-badge">{c.unreadCount > 99 ? '99+' : c.unreadCount}</span>
-                  ) : null}
-                </button>
-              </li>
-            ))}
-          </ul>
-        ) : null}
+
+        <div className="share-chat-modal-body">
+          <section className="share-chat-section" aria-label="Referencia a compartir">
+            <div className="share-chat-preview-card">
+              <span className="share-chat-preview-kicker">Conciliación · sesión {shareRef.sessionId}</span>
+              <p className="share-chat-preview-label">{shareRef.label}</p>
+              {shareRef.detail ? (
+                <p className="share-chat-preview-detail">{shareRef.detail}</p>
+              ) : null}
+            </div>
+          </section>
+
+          <section className="share-chat-section" aria-label="Contactos">
+            <h4 className="share-chat-section-title">Enviar a</h4>
+            <p className="share-chat-section-hint">
+              Se abrirá el chat con esta referencia. Podés escribir un mensaje antes de enviar.
+            </p>
+
+            {loading ? <p className="msg subtle share-chat-modal-status">Cargando contactos…</p> : null}
+            {error ? <p className="msg err share-chat-modal-status">{error}</p> : null}
+            {!loading && !error && contacts.length === 0 ? (
+              <p className="msg subtle share-chat-modal-status">No hay otros usuarios para escribir.</p>
+            ) : null}
+
+            {!loading && !error && contacts.length > 0 ? (
+              <ul className="share-chat-contact-list">
+                {contacts.map((c) => (
+                  <li key={c.id}>
+                    <button type="button" className="share-chat-contact-row" onClick={() => pick(c)}>
+                      <span className="share-chat-contact-name">{c.username}</span>
+                      {c.unreadCount > 0 ? (
+                        <span className="chat-drawer-badge">{c.unreadCount > 99 ? '99+' : c.unreadCount}</span>
+                      ) : null}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </section>
+        </div>
       </div>
     </div>
   )

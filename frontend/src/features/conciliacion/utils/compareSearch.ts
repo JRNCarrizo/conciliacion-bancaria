@@ -37,6 +37,19 @@ function amountValuesForRow(row: ComparisonRow): number[] {
     if (company.accountingAmount != null) xs.push(company.accountingAmount)
     return uniqueFinite(xs)
   }
+  if (row.kind === 'group') {
+    const { group, banks, companies } = row
+    const xs: number[] = [group.bankSum, group.companySum]
+    for (const m of banks) {
+      xs.push(m.amount)
+      if (m.accountingAmount != null) xs.push(m.accountingAmount)
+    }
+    for (const m of companies) {
+      xs.push(m.amount)
+      if (m.accountingAmount != null) xs.push(m.accountingAmount)
+    }
+    return uniqueFinite(xs)
+  }
   const m = row.m
   const xs: number[] = [m.amount]
   if (m.accountingAmount != null) xs.push(m.accountingAmount)
@@ -62,6 +75,20 @@ function textHaystackForRow(row: ComparisonRow): string {
     }
     return parts.filter((p) => p != null && String(p).trim() !== '').join(' \u2003 ')
   }
+  if (row.kind === 'group') {
+    const { group, banks, companies } = row
+    const parts = [
+      String(group.groupId),
+      ...group.bankTxIds.map(String),
+      ...group.companyTxIds.map(String),
+      formatAmount(group.bankSum),
+      formatAmount(group.companySum),
+    ]
+    for (const m of [...banks, ...companies]) {
+      parts.push(m.reference, m.description, formatAmount(m.amount))
+    }
+    return parts.filter((p) => p != null && String(p).trim() !== '').join(' \u2003 ')
+  }
   const m = row.m
   const parts = [
     String(m.id),
@@ -82,6 +109,15 @@ function rowMatchesId(row: ComparisonRow, idNum: number): boolean {
       pair.companyTxId === idNum ||
       bank.id === idNum ||
       company.id === idNum
+    )
+  }
+  if (row.kind === 'group') {
+    return (
+      row.group.groupId === idNum ||
+      row.group.bankTxIds.includes(idNum) ||
+      row.group.companyTxIds.includes(idNum) ||
+      row.banks.some((m) => m.id === idNum) ||
+      row.companies.some((m) => m.id === idNum)
     )
   }
   return row.m.id === idNum
@@ -144,6 +180,9 @@ export function rowMatchesClassification(row: ComparisonRow, raw: string): boole
   if (sel === '') return true
   if (row.kind === 'pair') {
     return normClassification(row.pair.classification) === sel
+  }
+  if (row.kind === 'group') {
+    return normClassification(row.group.classification) === sel
   }
   return normClassification(row.m.pendingClassification) === sel
 }

@@ -54,6 +54,7 @@ public class ConciliacionReimportService {
 	private final BancoWorkbookParser bancoWorkbookParser;
 	private final PlataformaWorkbookParser plataformaWorkbookParser;
 	private final ConciliacionManualPairService manualPairService;
+	private final MovementMatchService movementMatchService;
 	private final MovementAttachmentService movementAttachmentService;
 	private final SessionAuditService sessionAuditService;
 
@@ -63,7 +64,8 @@ public class ConciliacionReimportService {
 			ReconciliationPairRepository reconciliationPairRepository,
 			PendingMovementCommentRepository pendingMovementCommentRepository,
 			BancoWorkbookParser bancoWorkbookParser, PlataformaWorkbookParser plataformaWorkbookParser,
-			ConciliacionManualPairService manualPairService, MovementAttachmentService movementAttachmentService,
+			ConciliacionManualPairService manualPairService, MovementMatchService movementMatchService,
+			MovementAttachmentService movementAttachmentService,
 			SessionAuditService sessionAuditService) {
 		this.sessionRepository = sessionRepository;
 		this.bankTransactionRepository = bankTransactionRepository;
@@ -73,6 +75,7 @@ public class ConciliacionReimportService {
 		this.bancoWorkbookParser = bancoWorkbookParser;
 		this.plataformaWorkbookParser = plataformaWorkbookParser;
 		this.manualPairService = manualPairService;
+		this.movementMatchService = movementMatchService;
 		this.movementAttachmentService = movementAttachmentService;
 		this.sessionAuditService = sessionAuditService;
 	}
@@ -260,7 +263,7 @@ public class ConciliacionReimportService {
 	}
 
 	private int removeBankTransaction(long sessionId, long txId) {
-		int pairs = manualPairService.unlinkPairForMovementSilent(sessionId, PendingMovementSide.BANK, txId) ? 1 : 0;
+		int pairs = manualPairService.unlinkAnyForMovementSilent(sessionId, PendingMovementSide.BANK, txId) ? 1 : 0;
 		cleanupMovementArtifacts(sessionId, PendingMovementSide.BANK, txId);
 		BankTransaction tx = bankTransactionRepository.findByIdAndSession_Id(txId, sessionId)
 				.orElseThrow(() -> new IllegalStateException("Movimiento de banco no encontrado: " + txId));
@@ -269,7 +272,7 @@ public class ConciliacionReimportService {
 	}
 
 	private int removeCompanyTransaction(long sessionId, long txId) {
-		int pairs = manualPairService.unlinkPairForMovementSilent(sessionId, PendingMovementSide.COMPANY, txId) ? 1
+		int pairs = manualPairService.unlinkAnyForMovementSilent(sessionId, PendingMovementSide.COMPANY, txId) ? 1
 				: 0;
 		cleanupMovementArtifacts(sessionId, PendingMovementSide.COMPANY, txId);
 		CompanyTransaction tx = companyTransactionRepository.findByIdAndSession_Id(txId, sessionId)
@@ -280,8 +283,8 @@ public class ConciliacionReimportService {
 
 	private int updateBankTransaction(long sessionId, RowUpdate update) {
 		int pairs = 0;
-		if (reconciliationPairRepository.existsByBankTransaction_Id(update.existingId())) {
-			pairs = manualPairService.unlinkPairForMovementSilent(sessionId, PendingMovementSide.BANK,
+		if (movementMatchService.isBankTransactionMatched(update.existingId())) {
+			pairs = manualPairService.unlinkAnyForMovementSilent(sessionId, PendingMovementSide.BANK,
 					update.existingId()) ? 1 : 0;
 		}
 		BankTransaction tx = bankTransactionRepository.findByIdAndSession_Id(update.existingId(), sessionId)
@@ -293,8 +296,8 @@ public class ConciliacionReimportService {
 
 	private int updateCompanyTransaction(long sessionId, RowUpdate update) {
 		int pairs = 0;
-		if (reconciliationPairRepository.existsByCompanyTransaction_Id(update.existingId())) {
-			pairs = manualPairService.unlinkPairForMovementSilent(sessionId, PendingMovementSide.COMPANY,
+		if (movementMatchService.isCompanyTransactionMatched(update.existingId())) {
+			pairs = manualPairService.unlinkAnyForMovementSilent(sessionId, PendingMovementSide.COMPANY,
 					update.existingId()) ? 1 : 0;
 		}
 		CompanyTransaction tx = companyTransactionRepository.findByIdAndSession_Id(update.existingId(), sessionId)
@@ -350,8 +353,8 @@ public class ConciliacionReimportService {
 		int count = 0;
 		for (Long txId : txIds) {
 			boolean linked = side == PendingMovementSide.BANK
-					? reconciliationPairRepository.existsByBankTransaction_Id(txId)
-					: reconciliationPairRepository.existsByCompanyTransaction_Id(txId);
+					? movementMatchService.isBankTransactionMatched(txId)
+					: movementMatchService.isCompanyTransactionMatched(txId);
 			if (linked) {
 				count++;
 			}

@@ -57,6 +57,12 @@ export function usePendingPairLinkPicker(
     setPromptDismissed(true)
   }
 
+  function clearSelection() {
+    setPromptDismissed(false)
+    setSelectedBankId(linkableBank.length === 1 ? linkableBank[0].m.id : null)
+    setSelectedCompanyId(linkableCompany.length === 1 ? linkableCompany[0].m.id : null)
+  }
+
   return {
     selectedBankId,
     selectedCompanyId,
@@ -64,6 +70,7 @@ export function usePendingPairLinkPicker(
     toggleCompany,
     prompt,
     dismissPrompt,
+    clearSelection,
   }
 }
 
@@ -92,11 +99,21 @@ export function RubroLinkConfirmModal({
 }) {
   useEffect(() => {
     function onKey(ev: KeyboardEvent) {
-      if (ev.key === 'Escape' && !loading) onCancel()
+      if (loading) return
+      if (ev.key === 'Escape') {
+        ev.preventDefault()
+        onCancel()
+        return
+      }
+      if (ev.key === 'Enter' && !ev.repeat) {
+        if (ev.target instanceof HTMLButtonElement) return
+        ev.preventDefault()
+        onConfirm()
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [loading, onCancel])
+  }, [loading, onCancel, onConfirm])
 
   return createPortal(
     <div
@@ -136,6 +153,9 @@ export function RubroLinkConfirmModal({
           </div>
         </div>
         {error ? <p className="msg err rubro-link-confirm-err">{error}</p> : null}
+        <p className="rubro-link-confirm-kbd-hint">
+          <kbd>Enter</kbd> vincula · <kbd>Esc</kbd> cancela
+        </p>
         <footer className="counterpart-modal-actions rubro-link-confirm-actions">
           <button type="button" className="btn-secondary" disabled={loading} onClick={onCancel}>
             Cancelar

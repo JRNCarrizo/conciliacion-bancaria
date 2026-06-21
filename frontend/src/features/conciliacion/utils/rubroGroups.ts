@@ -11,6 +11,7 @@ export type RubroMovementRef = {
   side: 'bank' | 'company'
   m: MovimientoDto
   pairId: number | null
+  groupId: number | null
 }
 
 export type RubroGroupRow = {
@@ -66,6 +67,26 @@ function pairIdByCompanyTx(detail: SessionDetail): Map<number, number> {
   return m
 }
 
+function groupIdByBankTx(detail: SessionDetail): Map<number, number> {
+  const m = new Map<number, number>()
+  for (const g of detail.groups ?? []) {
+    for (const id of g.bankTxIds) m.set(id, g.groupId)
+  }
+  return m
+}
+
+function groupIdByCompanyTx(detail: SessionDetail): Map<number, number> {
+  const m = new Map<number, number>()
+  for (const g of detail.groups ?? []) {
+    for (const id of g.companyTxIds) m.set(id, g.groupId)
+  }
+  return m
+}
+
+export function isRubroMovementLinkable(ref: RubroMovementRef): boolean {
+  return ref.pairId == null && ref.groupId == null
+}
+
 function amountGapThreshold(sessionAmountTolerance: number | null | undefined): number {
   if (sessionAmountTolerance !== undefined && sessionAmountTolerance !== null) {
     return Math.max(0, sessionAmountTolerance)
@@ -87,6 +108,8 @@ function buildGroupsInternal(
   const tol = amountGapThreshold(sessionAmountTolerance)
   const bankPair = pairIdByBankTx(detail)
   const companyPair = pairIdByCompanyTx(detail)
+  const bankGroup = groupIdByBankTx(detail)
+  const companyGroup = groupIdByCompanyTx(detail)
 
   type Acc = {
     displayLabel: string
@@ -122,7 +145,12 @@ function buildGroupsInternal(
     const a = accFor(groupKey, m)
     a.bankCount += 1
     a.bankSum += coerceAmount(m.amount)
-    a.bankItems.push({ side: 'bank', m, pairId: bankPair.get(m.id) ?? null })
+    a.bankItems.push({
+      side: 'bank',
+      m,
+      pairId: bankPair.get(m.id) ?? null,
+      groupId: bankGroup.get(m.id) ?? null,
+    })
   }
 
   for (const m of detail.companyTransactions) {
@@ -130,7 +158,12 @@ function buildGroupsInternal(
     const a = accFor(groupKey, m)
     a.companyCount += 1
     a.companySum += coerceAmount(m.amount)
-    a.companyItems.push({ side: 'company', m, pairId: companyPair.get(m.id) ?? null })
+    a.companyItems.push({
+      side: 'company',
+      m,
+      pairId: companyPair.get(m.id) ?? null,
+      groupId: companyGroup.get(m.id) ?? null,
+    })
   }
 
   const rows: RubroGroupRow[] = []
@@ -223,6 +256,38 @@ export function mergedCompanyItems(groups: readonly RubroGroupRow[]): RubroMovem
     .sort((x, y) => x.m.txDate.localeCompare(y.m.txDate) || x.m.id - y.m.id)
 }
 
+/** Grupos únicos elegidos en banco y/o empresa (para vista previa con ambas columnas). */
+export function unionPreviewGroups(
+  bankGroups: readonly RubroGroupRow[],
+  companyGroups: readonly RubroGroupRow[],
+): RubroGroupRow[] {
+  const map = new Map<string, RubroGroupRow>()
+  for (const g of bankGroups) map.set(g.groupKey, g)
+  for (const g of companyGroups) map.set(g.groupKey, g)
+  return [...map.values()]
+}
+
+/** Grupos marcados en Comparar (cualquier lado), resueltos desde la lista completa. */
+export function resolvePickedRubroGroups(
+  groups: readonly RubroGroupRow[],
+  pickBankKeys: ReadonlySet<string>,
+  pickCompanyKeys: ReadonlySet<string>,
+): RubroGroupRow[] {
+  if (pickBankKeys.size === 0 && pickCompanyKeys.size === 0) return []
+  return groups.filter((g) => pickBankKeys.has(g.groupKey) || pickCompanyKeys.has(g.groupKey))
+}
+
+/** Movimientos para las dos columnas del panel de comparación (todos los rubros marcados). */
+export function crossCompareTableItems(previewGroups: readonly RubroGroupRow[]): {
+  bankItems: RubroMovementRef[]
+  companyItems: RubroMovementRef[]
+} {
+  return {
+    bankItems: mergedBankItems(previewGroups),
+    companyItems: mergedCompanyItems(previewGroups),
+  }
+}
+
 export type BulkClassificationTarget = {
   bankPendingIds: number[]
   companyPendingIds: number[]
@@ -238,15 +303,15 @@ export function collectBulkClassificationTargets(
   const pairIds = new Set<number>()
 
   for (const g of bankGroups) {
-    for (const { m, pairId } of g.bankItems) {
-      if (pairId != null) pairIds.add(pairId)
-      else bankPendingIds.add(m.id)
+    for (const ref of g.bankItems) {
+      if (ref.pairId != null) pairIds.add(ref.pairId)
+      else if (isRubroMovementLinkable(ref)) bankPendingIds.add(ref.m.id)
     }
   }
   for (const g of companyGroups) {
-    for (const { m, pairId } of g.companyItems) {
-      if (pairId != null) pairIds.add(pairId)
-      else companyPendingIds.add(m.id)
+    for (const ref of g.companyItems) {
+      if (ref.pairId != null) pairIds.add(ref.pairId)
+      else if (isRubroMovementLinkable(ref)) companyPendingIds.add(ref.m.id)
     }
   }
 
@@ -277,27 +342,31 @@ export function rubroGroupsSummary(groups: RubroGroupRow[]) {
 
 export function allBankMovementRefs(detail: SessionDetail): RubroMovementRef[] {
   const pairMap = pairIdByBankTx(detail)
+  const groupMap = groupIdByBankTx(detail)
   return detail.bankTransactions.map((m) => ({
     side: 'bank',
     m,
     pairId: pairMap.get(m.id) ?? null,
+    groupId: groupMap.get(m.id) ?? null,
   }))
 }
 
 export function allCompanyMovementRefs(detail: SessionDetail): RubroMovementRef[] {
   const pairMap = pairIdByCompanyTx(detail)
+  const groupMap = groupIdByCompanyTx(detail)
   return detail.companyTransactions.map((m) => ({
     side: 'company',
     m,
     pairId: pairMap.get(m.id) ?? null,
+    groupId: groupMap.get(m.id) ?? null,
   }))
 }
 
 export function ledgerViewSummary(detail: SessionDetail) {
   const bank = allBankMovementRefs(detail)
   const company = allCompanyMovementRefs(detail)
-  const bankPending = bank.filter((i) => i.pairId == null).length
-  const companyPending = company.filter((i) => i.pairId == null).length
+  const bankPending = bank.filter(isRubroMovementLinkable).length
+  const companyPending = company.filter(isRubroMovementLinkable).length
   const bankSum = bank.reduce((s, i) => s + coerceAmount(i.m.amount), 0)
   const companySum = company.reduce((s, i) => s + coerceAmount(i.m.amount), 0)
   return {

@@ -167,15 +167,17 @@ export type MovementAttachmentDto = {
   createdByUsername?: string | null
 }
 
-/** Comentarios: un movimiento o conversación banco + empresa en un par. */
+/** Comentarios: un movimiento, un par o un grupo N:M. */
 export type PendingThreadTarget =
   | { kind: 'single'; side: 'bank' | 'company'; txId: number }
   | { kind: 'pair'; pairId: number }
+  | { kind: 'group'; groupId: number }
 
-/** Adjuntos: pendiente por movimiento, o un solo conjunto por par conciliado. */
+/** Adjuntos: pendiente por movimiento, par conciliado o grupo N:M. */
 export type PendingAttachmentTarget =
   | { kind: 'single'; side: 'bank' | 'company'; txId: number }
   | { kind: 'pair'; pairId: number }
+  | { kind: 'group'; groupId: number }
 
 export type PendingCommentDto = {
   id: number
@@ -191,6 +193,23 @@ export type PendingCommentDto = {
  * AMOUNT_GAP · |Δ| por encima de esa tolerancia (brecha real; p. ej. vínculo manual o datos incoherentes).
  */
 export type PairKind = 'EXACT' | 'AMOUNT_ADJUST' | 'AMOUNT_GAP' | 'OPPOSITE_SIGN'
+
+export type GroupDto = {
+  groupId: number
+  matchSource: string
+  bankTxIds: number[]
+  companyTxIds: number[]
+  bankSum: number
+  companySum: number
+  bankMinDate: string | null
+  companyMinDate: string | null
+  pairKind: PairKind
+  classification?: string | null
+  /** Comentarios del grupo (un solo hilo por fila N:M). */
+  groupCommentCount?: number
+  /** Comprobantes asociados al grupo conciliado. */
+  groupAttachmentCount?: number
+}
 
 export type ParDto = {
   pairId: number
@@ -215,6 +234,7 @@ export type ConciliacionStatsDto = {
   bankRowCount: number
   companyRowCount: number
   matchedPairs: number
+  matchedGroups?: number
   unmatchedBankCount: number
   unmatchedCompanyCount: number
   sumBank: number
@@ -272,6 +292,7 @@ export type SessionDetail = {
   unmatchedBankTransactions: MovimientoDto[]
   unmatchedCompanyTransactions: MovimientoDto[]
   pairs: ParDto[]
+  groups?: GroupDto[]
   stats: ConciliacionStatsDto
   deferredFromSession: DeferredMovement[]
   deferredIntoSession: DeferredMovement[]
@@ -322,6 +343,13 @@ export type ComparisonRow =
       pair: ParDto
       bank: MovimientoDto
       company: MovimientoDto
+    }
+  | {
+      key: string
+      kind: 'group'
+      group: GroupDto
+      banks: MovimientoDto[]
+      companies: MovimientoDto[]
     }
   | { key: string; kind: 'unmatchedBank'; m: MovimientoDto }
   | { key: string; kind: 'unmatchedCompany'; m: MovimientoDto }

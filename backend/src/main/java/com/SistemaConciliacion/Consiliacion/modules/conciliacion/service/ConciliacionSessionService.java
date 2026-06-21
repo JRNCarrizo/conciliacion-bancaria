@@ -23,6 +23,7 @@ import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.Classif
 import com.SistemaConciliacion.Consiliacion.config.SecurityUtils;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.CommentCreateDto;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.ConciliacionStatsDto;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.GroupDto;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.MovimientoDto;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.PendingCommentDto;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.ParDto;
@@ -35,7 +36,9 @@ import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.BankTran
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.CompanyTransaction;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.PendingMovementComment;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.PendingMovementSide;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.ReconciliationGroup;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.ReconciliationPair;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.ReconciliationGroupComment;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.ReconciliationPairComment;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.ReconciliationSession;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.SessionAuditEventType;
@@ -45,6 +48,9 @@ import com.SistemaConciliacion.Consiliacion.modules.conciliacion.repository.Comp
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.repository.MovementAttachmentRepository;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.repository.PairAttachmentRepository;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.repository.PendingMovementCommentRepository;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.repository.GroupAttachmentRepository;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.repository.ReconciliationGroupCommentRepository;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.repository.ReconciliationGroupRepository;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.repository.ReconciliationPairCommentRepository;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.repository.ReconciliationPairRepository;
 import com.SistemaConciliacion.Consiliacion.modules.conciliacion.repository.ReconciliationSessionRepository;
@@ -62,8 +68,13 @@ public class ConciliacionSessionService {
 	private final MovementAttachmentRepository movementAttachmentRepository;
 	private final PairAttachmentRepository pairAttachmentRepository;
 	private final ReconciliationPairCommentRepository reconciliationPairCommentRepository;
+	private final ReconciliationGroupCommentRepository reconciliationGroupCommentRepository;
+	private final GroupAttachmentRepository groupAttachmentRepository;
+	private final ReconciliationGroupRepository groupRepository;
 	private final SessionAuditService sessionAuditService;
 	private final ConciliacionDeferredMovementService deferredMovementService;
+	private final ConciliacionGroupService conciliacionGroupService;
+	private final MovementMatchService movementMatchService;
 
 	public ConciliacionSessionService(ReconciliationSessionRepository sessionRepository,
 			BankTransactionRepository bankTransactionRepository,
@@ -73,8 +84,12 @@ public class ConciliacionSessionService {
 			MovementAttachmentRepository movementAttachmentRepository,
 			PairAttachmentRepository pairAttachmentRepository,
 			ReconciliationPairCommentRepository reconciliationPairCommentRepository,
+			ReconciliationGroupCommentRepository reconciliationGroupCommentRepository,
+			GroupAttachmentRepository groupAttachmentRepository,
+			ReconciliationGroupRepository groupRepository,
 			SessionAuditService sessionAuditService,
-			ConciliacionDeferredMovementService deferredMovementService) {
+			ConciliacionDeferredMovementService deferredMovementService,
+			ConciliacionGroupService conciliacionGroupService, MovementMatchService movementMatchService) {
 		this.sessionRepository = sessionRepository;
 		this.bankTransactionRepository = bankTransactionRepository;
 		this.companyTransactionRepository = companyTransactionRepository;
@@ -83,8 +98,13 @@ public class ConciliacionSessionService {
 		this.movementAttachmentRepository = movementAttachmentRepository;
 		this.pairAttachmentRepository = pairAttachmentRepository;
 		this.reconciliationPairCommentRepository = reconciliationPairCommentRepository;
+		this.reconciliationGroupCommentRepository = reconciliationGroupCommentRepository;
+		this.groupAttachmentRepository = groupAttachmentRepository;
+		this.groupRepository = groupRepository;
 		this.sessionAuditService = sessionAuditService;
 		this.deferredMovementService = deferredMovementService;
+		this.conciliacionGroupService = conciliacionGroupService;
+		this.movementMatchService = movementMatchService;
 	}
 
 	@Transactional(readOnly = true)
@@ -114,12 +134,17 @@ public class ConciliacionSessionService {
 		List<CompanyTransaction> companies = companyTransactionRepository
 				.findBySession_IdOrderByTxDateAscIdAsc(sessionId);
 		List<ReconciliationPair> pairs = reconciliationPairRepository.findAllWithPartiesBySessionId(sessionId);
+		List<ReconciliationGroup> groups = conciliacionGroupService.listGroupsWithMembers(sessionId);
 
 		Set<Long> matchedBankIds = new HashSet<>();
 		Set<Long> matchedCompanyIds = new HashSet<>();
 		for (ReconciliationPair p : pairs) {
 			matchedBankIds.add(p.getBankTransaction().getId());
 			matchedCompanyIds.add(p.getCompanyTransaction().getId());
+		}
+		for (ReconciliationGroup g : groups) {
+			g.getBankMembers().forEach(m -> matchedBankIds.add(m.getBankTransaction().getId()));
+			g.getCompanyMembers().forEach(m -> matchedCompanyIds.add(m.getCompanyTransaction().getId()));
 		}
 
 		Set<Long> duplicateBankIds = duplicateIdsBank(banks);
@@ -131,6 +156,15 @@ public class ConciliacionSessionService {
 			String cl = p.getClassification();
 			classificationByMatchedBankTxId.put(p.getBankTransaction().getId(), cl);
 			classificationByMatchedCompanyTxId.put(p.getCompanyTransaction().getId(), cl);
+		}
+		for (ReconciliationGroup g : groups) {
+			String cl = g.getClassification();
+			for (var m : g.getBankMembers()) {
+				classificationByMatchedBankTxId.put(m.getBankTransaction().getId(), cl);
+			}
+			for (var m : g.getCompanyMembers()) {
+				classificationByMatchedCompanyTxId.put(m.getCompanyTransaction().getId(), cl);
+			}
 		}
 
 		List<BankTransaction> unmatchedBankEntities = banks.stream().filter(t -> !matchedBankIds.contains(t.getId()))
@@ -146,6 +180,8 @@ public class ConciliacionSessionService {
 		Map<String, Long> attachmentCounts = attachmentCountMap(sessionId);
 		Map<Long, Long> pairAttachmentCounts = pairAttachmentCountMap(sessionId);
 		Map<Long, Long> pairCommentCounts = pairCommentCountMap(sessionId);
+		Map<Long, Long> groupCommentCounts = groupCommentCountMap(sessionId);
+		Map<Long, Long> groupAttachmentCounts = groupAttachmentCountMap(sessionId);
 
 		Map<Long, DeferredMovementDto> incorporatedDeferred = deferredMovementService
 				.incorporatedByTransactionId(sessionId);
@@ -190,8 +226,13 @@ public class ConciliacionSessionService {
 						pairAttachmentCounts.getOrDefault(p.getId(), 0L),
 						pairCommentCounts.getOrDefault(p.getId(), 0L)))
 				.toList();
+		List<GroupDto> groupDtos = groups.stream()
+				.map(g -> conciliacionGroupService.toDto(g, gapThreshold,
+						groupCommentCounts.getOrDefault(g.getId(), 0L),
+						groupAttachmentCounts.getOrDefault(g.getId(), 0L)))
+				.toList();
 
-		ConciliacionStatsDto stats = buildStats(s, banks, companies, pairs, matchedBankIds, matchedCompanyIds,
+		ConciliacionStatsDto stats = buildStats(s, banks, companies, pairs, groups, matchedBankIds, matchedCompanyIds,
 				gapThreshold);
 
 		if (recordAccess) {
@@ -203,7 +244,7 @@ public class ConciliacionSessionService {
 		long availableDeferredCount = deferredMovementService.countAvailableForSession(sessionId);
 
 		return new SessionDetailDto(toHeader(s), bankDtos, companyDtos, unmatchedBank, unmatchedCompany, parDtos,
-				stats, deferredFromSession, deferredIntoSession, availableDeferredCount);
+				groupDtos, stats, deferredFromSession, deferredIntoSession, availableDeferredCount);
 	}
 
 	@Transactional
@@ -290,9 +331,9 @@ public class ConciliacionSessionService {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
 					"La conciliación está cerrada; la clasificación no se puede modificar.");
 		}
-		if (reconciliationPairRepository.existsByBankTransaction_Id(bankTxId)) {
+		if (movementMatchService.isBankTransactionMatched(bankTxId)) {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-					"Este movimiento está en un par conciliado; la clasificación es una sola por fila (usá el par).");
+					"Este movimiento está conciliado (par o grupo); la clasificación es una sola por vínculo.");
 		}
 		BankTransaction t = bankTransactionRepository.findByIdAndSession_Id(bankTxId, sessionId)
 				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Movimiento no encontrado"));
@@ -308,9 +349,9 @@ public class ConciliacionSessionService {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
 					"La conciliación está cerrada; la clasificación no se puede modificar.");
 		}
-		if (reconciliationPairRepository.existsByCompanyTransaction_Id(companyTxId)) {
+		if (movementMatchService.isCompanyTransactionMatched(companyTxId)) {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-					"Este movimiento está en un par conciliado; la clasificación es una sola por fila (usá el par).");
+					"Este movimiento está conciliado (par o grupo); la clasificación es una sola por vínculo.");
 		}
 		CompanyTransaction t = companyTransactionRepository.findByIdAndSession_Id(companyTxId, sessionId)
 				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Movimiento no encontrado"));
@@ -415,6 +456,45 @@ public class ConciliacionSessionService {
 		return new PendingCommentDto(c.getId(), c.getBody(), c.getCreatedAt(), c.getCreatedByUsername());
 	}
 
+	@Transactional(readOnly = true)
+	public List<PendingCommentDto> listGroupComments(long sessionId, long groupId) {
+		sessionRepository.findById(sessionId)
+				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sesión no encontrada"));
+		groupRepository.findByIdAndSession_Id(groupId, sessionId)
+				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Grupo no encontrado"));
+		return reconciliationGroupCommentRepository.findBySession_IdAndGroup_IdOrderByCreatedAtAsc(sessionId, groupId)
+				.stream()
+				.map(c -> new PendingCommentDto(c.getId(), c.getBody(), c.getCreatedAt(), c.getCreatedByUsername()))
+				.toList();
+	}
+
+	@Transactional
+	public PendingCommentDto addGroupComment(long sessionId, long groupId, CommentCreateDto dto) {
+		ReconciliationSession session = sessionRepository.findById(sessionId)
+				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sesión no encontrada"));
+		if (session.getStatus() == SessionStatus.CLOSED) {
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+					"La conciliación está cerrada; no se pueden agregar comentarios.");
+		}
+		ReconciliationGroup group = groupRepository.findByIdAndSession_Id(groupId, sessionId)
+				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Grupo no encontrado"));
+		String text = dto == null || dto.text() == null ? "" : dto.text().trim();
+		if (text.isEmpty()) {
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "El comentario no puede estar vacío.");
+		}
+		if (text.length() > 4000) {
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "El comentario supera los 4000 caracteres.");
+		}
+		ReconciliationGroupComment c = new ReconciliationGroupComment();
+		c.setSession(session);
+		c.setGroup(group);
+		c.setBody(text);
+		c.setCreatedAt(Instant.now());
+		c.setCreatedByUsername(SecurityUtils.currentUsername());
+		reconciliationGroupCommentRepository.save(c);
+		return new PendingCommentDto(c.getId(), c.getBody(), c.getCreatedAt(), c.getCreatedByUsername());
+	}
+
 	private static final int MAX_CLASSIFICATION_LEN = 128;
 
 	private static String normalizeClassification(String raw) {
@@ -455,13 +535,14 @@ public class ConciliacionSessionService {
 	}
 
 	private ConciliacionStatsDto buildStats(ReconciliationSession session, List<BankTransaction> banks,
-			List<CompanyTransaction> companies, List<ReconciliationPair> pairs, Set<Long> matchedBankIds,
-			Set<Long> matchedCompanyIds, BigDecimal amountGapThreshold) {
+			List<CompanyTransaction> companies, List<ReconciliationPair> pairs, List<ReconciliationGroup> groups,
+			Set<Long> matchedBankIds, Set<Long> matchedCompanyIds, BigDecimal amountGapThreshold) {
 		long bankRowCount = banks.size();
 		long companyRowCount = companies.size();
 		long matchedPairs = pairs.size();
-		long unmatchedBankCount = bankRowCount - matchedPairs;
-		long unmatchedCompanyCount = companyRowCount - matchedPairs;
+		long matchedGroups = groups.size();
+		long unmatchedBankCount = bankRowCount - matchedBankIds.size();
+		long unmatchedCompanyCount = companyRowCount - matchedCompanyIds.size();
 
 		BigDecimal sumBank = sumBankAmounts(banks);
 		BigDecimal sumCompany = sumCompanyAmounts(companies);
@@ -472,6 +553,14 @@ public class ConciliacionSessionService {
 				.reduce(BigDecimal.ZERO, BigDecimal::add);
 		BigDecimal sumReconciledCompany = pairs.stream().map(p -> p.getCompanyTransaction().getAmount())
 				.reduce(BigDecimal.ZERO, BigDecimal::add);
+		for (ReconciliationGroup g : groups) {
+			sumReconciledBank = sumReconciledBank.add(g.getBankMembers().stream()
+					.map(m -> m.getBankTransaction().getAmount())
+					.reduce(BigDecimal.ZERO, BigDecimal::add));
+			sumReconciledCompany = sumReconciledCompany.add(g.getCompanyMembers().stream()
+					.map(m -> m.getCompanyTransaction().getAmount())
+					.reduce(BigDecimal.ZERO, BigDecimal::add));
+		}
 
 		BigDecimal sumPendingBank = banks.stream().filter(t -> !matchedBankIds.contains(t.getId()))
 				.map(BankTransaction::getAmount).reduce(BigDecimal.ZERO, BigDecimal::add);
@@ -489,8 +578,21 @@ public class ConciliacionSessionService {
 		for (ReconciliationPair p : pairs) {
 			BigDecimal ba = p.getBankTransaction().getAmount();
 			BigDecimal ca = p.getCompanyTransaction().getAmount();
-			BigDecimal gap = ba.subtract(ca).abs();
-			if (gap.compareTo(amountGapThreshold) <= 0) {
+			if (ba.subtract(ca).abs().compareTo(amountGapThreshold) <= 0) {
+				pairsExactAmountCount++;
+			} else {
+				pairsWithAmountGapCount++;
+			}
+			if (ba.signum() != 0 && ca.signum() != 0 && ba.signum() != ca.signum()) {
+				pairsOppositeSignCount++;
+			}
+		}
+		for (ReconciliationGroup g : groups) {
+			BigDecimal ba = g.getBankMembers().stream().map(m -> m.getBankTransaction().getAmount())
+					.reduce(BigDecimal.ZERO, BigDecimal::add);
+			BigDecimal ca = g.getCompanyMembers().stream().map(m -> m.getCompanyTransaction().getAmount())
+					.reduce(BigDecimal.ZERO, BigDecimal::add);
+			if (ba.subtract(ca).abs().compareTo(amountGapThreshold) <= 0) {
 				pairsExactAmountCount++;
 			} else {
 				pairsWithAmountGapCount++;
@@ -529,7 +631,7 @@ public class ConciliacionSessionService {
 				adjustedBalanceFromBank, adjustedVsCompanyClosing, closingBank, closingCompany, sumCompanyAccounting,
 				pairsExactAmountCount, pairsWithAmountGapCount, pairsOppositeSignCount, auditCierreCuadrado);
 
-		return new ConciliacionStatsDto(bankRowCount, companyRowCount, matchedPairs, unmatchedBankCount,
+		return new ConciliacionStatsDto(bankRowCount, companyRowCount, matchedPairs, matchedGroups, unmatchedBankCount,
 				unmatchedCompanyCount, sumBank, sumCompany, differenceTotal, sumReconciledBank, sumReconciledCompany,
 				sumPendingBank, sumPendingCompany, pctRowsBank, pctRowsCompany, reconciledPairDelta, pendingNetDifference,
 				pairAmountMismatch, differenceDecompositionOk, st.code(), st.detail(), explanation, adjustedBalanceFromBank,
@@ -746,6 +848,26 @@ public class ConciliacionSessionService {
 			long pairId = ((Number) row[0]).longValue();
 			long cnt = ((Number) row[1]).longValue();
 			m.put(pairId, cnt);
+		}
+		return m;
+	}
+
+	private Map<Long, Long> groupCommentCountMap(long sessionId) {
+		Map<Long, Long> m = new HashMap<>();
+		for (Object[] row : reconciliationGroupCommentRepository.countByGroupGrouped(sessionId)) {
+			long groupId = ((Number) row[0]).longValue();
+			long cnt = ((Number) row[1]).longValue();
+			m.put(groupId, cnt);
+		}
+		return m;
+	}
+
+	private Map<Long, Long> groupAttachmentCountMap(long sessionId) {
+		Map<Long, Long> m = new HashMap<>();
+		for (Object[] row : groupAttachmentRepository.countByGroupGrouped(sessionId)) {
+			long groupId = ((Number) row[0]).longValue();
+			long cnt = ((Number) row[1]).longValue();
+			m.put(groupId, cnt);
 		}
 		return m;
 	}

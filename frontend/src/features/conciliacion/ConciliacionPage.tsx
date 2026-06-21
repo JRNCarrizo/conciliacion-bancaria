@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useSearchParams, useLocation } from 'react-router-dom'
 import './conciliacion.css'
+import { HelpPopoverButton } from './HelpPopoverButton'
 import {
   DEFAULT_IMPORT_BANK_LAYOUT_EXCEL,
   DEFAULT_IMPORT_COMPANY_LAYOUT_EXCEL,
@@ -22,6 +23,7 @@ import type {
   PageSessions,
   ParDto,
   PairKind,
+  GroupDto,
   PendingCommentDto,
   SessionAuditEntry,
   SessionClosingInfo,
@@ -53,17 +55,20 @@ import {
   formatToleranceInputDisplay,
   statusPanelClass,
 } from './utils/format'
-import { parseBalanceInput, parseTransactionId } from './utils/parse'
+import { parseBalanceInput } from './utils/parse'
 import {
   bankLayoutExcelToApi,
   companyLayoutExcelToApi,
   normalizeColumnLettersInput,
 } from './utils/importLayoutExcel'
 import { CounterpartPreviewModal } from './CounterpartPreviewModal'
-import { ManualLinkPreview } from './ManualLinkPreview'
 import { ClassificationCombo } from './ClassificationCombo'
 import { FullLedgerView } from './FullLedgerView'
+import { PendingLinkSelectionPanel } from './PendingLinkSelectionPanel'
 import { RubroGroupsView } from './RubroGroupsView'
+import { RubroLinkConfirmModal } from './RubroLinkConfirmModal'
+import { usePendingMultiLinkPicker } from './usePendingMultiLinkPicker'
+import { CompareGroupTableRows, compareGroupSideKey } from './CompareGroupTableRows'
 import {
   findDuplicateSiblings,
   fuzzyMatchBadgeLabel,
@@ -76,6 +81,12 @@ import { SessionSourceFiles } from './SessionSourceFiles'
 import { SessionReimportPanel } from './SessionReimportPanel'
 import { SessionDeferredPanels } from './SessionDeferredPanels'
 import { deferMovement } from './api/deferred'
+import { createReconciliationGroup, deleteReconciliationGroup } from './api/groups'
+import {
+  allBankMovementRefs,
+  allCompanyMovementRefs,
+  isRubroMovementLinkable,
+} from './utils/rubroGroups'
 import { ShareInChatButton } from './ShareInChatButton'
 import { UnlinkPairButton } from './UnlinkPairButton'
 import {
@@ -122,9 +133,9 @@ function AuditClosingPanel({
       <div className="audit-closing audit-closing--need-data">
         <h4 className="audit-closing-title">Auditoría de cierre</h4>
         <p className="audit-closing-text">
-          Cargá <strong>saldo final banco</strong> y <strong>saldo final empresa</strong> en el formulario
-          de abajo para validar el puente extracto ↔ libro y dejar el circuito listo para revisión
-          externa.
+          Cargá <strong>saldo final banco</strong> y <strong>saldo final empresa</strong> en{' '}
+          <strong>Saldos del período</strong> (icono de configuración del resumen) para validar el puente
+          extracto ↔ libro y dejar el circuito listo para revisión externa.
         </p>
       </div>
     )
@@ -182,10 +193,9 @@ function CompareViewHelpText({
 }) {
   return (
     <>
-      Tocá un color (o «Todos») para ver solo filas de ese estado; en la barra de abajo, buscá por ID,
-      referencia, descripción o importe (mitad izquierda), filtrá por clasificación si querés (mitad
-      derecha) y acotá por fechas (extremo derecho). La grilla se ordena: pares, pendientes banco,
-      pendientes empresa.
+      Tocá un color (o «Todos») para ver solo filas de ese estado. En la barra de filtros, buscá por ID,
+      referencia, descripción o importe; filtrá por clasificación y acotá por fechas. La grilla se ordena:
+      pares, pendientes banco, pendientes empresa. El icono ⌨ resume los atajos para vincular pendientes.
       {effectiveSessionAmountTolerance !== undefined ? (
         <>
           {' '}
@@ -226,9 +236,10 @@ function LedgerViewHelpText() {
         empresa a la derecha. Cada columna tiene <strong>scroll independiente</strong>.
       </p>
       <p>
-        En cada fila ves <strong>par</strong> si está conciliado (abrís el emparejamiento) o{' '}
-        <strong>pend.</strong> si falta vincular. Tocá un pendiente en cada lado para conciliar
-        manualmente, igual que al expandir un grupo en la vista por rubro.
+        En cada fila ves <strong>par</strong> o <strong>grp</strong> si ya está conciliado, o{' '}
+        <strong>pend.</strong> si falta vincular. Tocá varios <strong>pend.</strong> en cada columna para
+        seleccionarlos: con uno de cada lado se abre el vínculo 1:1; con varios de algún lado podés{' '}
+        <strong>conciliar grupo</strong> (N:M).
       </p>
     </>
   )
@@ -246,8 +257,9 @@ function RubroViewHelpText() {
         Si los textos no coinciden, usá la columna <strong>Comparar</strong>: cada clic en{' '}
         <strong>Banco</strong> o <strong>Empresa</strong> agrega o quita ese grupo del panel de
         comparación cruzada (podés elegir varios de cada lado). Ahí ves Σ y Δ, podés{' '}
-        <strong>clasificar</strong> todos los movimientos seleccionados con un solo rubro y{' '}
-        <strong>vincular</strong> pendientes (clic en la fila de cada lado).
+        <strong>clasificar</strong> todos los movimientos seleccionados con un solo rubro,
+        <strong> vincular</strong> pendientes 1:1 (clic en la fila de cada lado) o{' '}
+        <strong>conciliar grupo</strong> cuando hay varios de un lado y uno o más del otro (N:M).
       </p>
       <p>
         Δ en la tabla = mismo grupo (misma fila). Cuadrado si |Δ| ≤ tolerancia de importe. En
@@ -257,18 +269,6 @@ function RubroViewHelpText() {
   )
 }
 
-function ManualLinkHelpText() {
-  return (
-    <p>
-      En comparativa o vista completa, hacé clic en <strong>Posible match</strong> o{' '}
-      <strong>Duplicado</strong> para ver el detalle al lado y vincular desde ahí. También podés copiar
-      los <strong>ID</strong> de la tabla (solo dígitos). Ambos movimientos deben seguir{' '}
-      <strong>pendientes</strong>. Los vínculos manuales no se borran al conciliar en automático. En
-      pares automáticos podés usar <strong>Desvincular</strong> para devolverlos a pendientes sin
-      re-conciliar toda la sesión.
-    </p>
-  )
-}
 
 function ExecutiveSummaryGuide() {
   return (
@@ -354,8 +354,8 @@ function ExecutiveSummaryGuide() {
         <h4 className="exec-help-h">Saldos y auditoría</h4>
         <ul>
           <li>
-            <strong>Saldo final banco / extracto</strong> — lo informado por el extracto (lo cargás en el
-            formulario de saldos de la sesión).
+            <strong>Saldo final banco / extracto</strong> — lo informado por el extracto (lo cargás en{' '}
+            <strong>Saldos del período</strong>, desde el icono ⚙ del resumen).
           </li>
           <li>
             <strong>Saldo final empresa</strong> — el registrado por la empresa para el mismo corte.
@@ -426,12 +426,27 @@ function ExecutiveSummaryGuide() {
   )
 }
 
+function ExecutiveSummarySettingsIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden className="exec-summary-settings-icon">
+      <path
+        fill="currentColor"
+        d="M19.14 12.94c.04-.31.06-.63.06-.94 0-.31-.02-.63-.06-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.488.488 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z"
+      />
+    </svg>
+  )
+}
+
 function ExecutiveSummaryPanel({
   stats,
   closing,
+  balancesStatus,
+  onOpenBalances,
 }: {
   stats: ConciliacionStatsDto
   closing: SessionClosingInfo
+  balancesStatus: BalancesLoadStatus
+  onOpenBalances: () => void
 }) {
   const diff = stats.differenceTotal
   const diffNonZero = Math.abs(diff) >= 0.005
@@ -449,6 +464,27 @@ function ExecutiveSummaryPanel({
         <span className="exec-summary-disclosure-meta">
           Dif. {formatAmount(diff)} · {stats.matchedPairs} pares · {stats.bankRowCount + stats.companyRowCount}{' '}
           filas
+        </span>
+        <span className="exec-summary-settings-wrap">
+          {balancesStatus !== 'empty' && (
+            <span
+              className={`balances-disclosure-badge balances-disclosure-badge--${balancesStatus} exec-summary-balances-badge`}
+            >
+              {BALANCES_STATUS_LABEL[balancesStatus]}
+            </span>
+          )}
+          <button
+            type="button"
+            className="exec-summary-settings-btn"
+            aria-label="Configuración — saldos del período"
+            title="Saldos del período"
+            onClick={(ev) => {
+              ev.preventDefault()
+              onOpenBalances()
+            }}
+          >
+            <ExecutiveSummarySettingsIcon />
+          </button>
         </span>
       </summary>
       <div className="exec-summary-disclosure-body">
@@ -505,7 +541,7 @@ function ExecutiveSummaryPanel({
               </span>
             </>
           ) : (
-            '— (indicá saldo final extracto abajo)'
+            '— (indicá saldo final extracto en configuración)'
           )}
         </dd>
         <dt>Dif. saldo ajustado vs saldo final empresa</dt>
@@ -554,8 +590,13 @@ function pairKindForComparisonRow(
   row: ComparisonRow,
   sessionTolerance: number | null | undefined,
 ): PairKind | null {
-  if (row.kind !== 'pair') return null
-  return effectivePairKindFromAmounts(row.bank.amount, row.company.amount, sessionTolerance)
+  if (row.kind === 'pair') {
+    return effectivePairKindFromAmounts(row.bank.amount, row.company.amount, sessionTolerance)
+  }
+  if (row.kind === 'group') {
+    return effectivePairKindFromAmounts(row.group.bankSum, row.group.companySum, sessionTolerance)
+  }
+  return null
 }
 
 /** Etiqueta y estilo del estado en grilla (par conciliado). */
@@ -658,7 +699,6 @@ function SessionBalancesForm({
   /** Sesión cerrada: solo lectura (valores guardados). */
   readOnly: boolean
 }) {
-  const [expanded, setExpanded] = useState(false)
   const [openingBankBalance, setOpeningBankBalance] = useState('')
   const [closingBankBalance, setClosingBankBalance] = useState('')
   const [openingCompanyBalance, setOpeningCompanyBalance] = useState('')
@@ -684,7 +724,6 @@ function SessionBalancesForm({
       session.closingCompanyBalance != null ? String(session.closingCompanyBalance) : '',
     )
     setErr(null)
-    setExpanded(false)
   }, [session.id, readOnly])
 
   async function handleSubmit(e: React.FormEvent) {
@@ -712,175 +751,142 @@ function SessionBalancesForm({
     }
   }
 
+  return (
+    <form
+      className={['balances-form', readOnly && 'balances-form--locked'].filter(Boolean).join(' ')}
+      onSubmit={(e) => void handleSubmit(e)}
+    >
+      {readOnly ? (
+        <p className="hint balances-locked-hint">
+          <strong>Conciliación cerrada:</strong> saldos y clasificación de pendientes en solo lectura.
+        </p>
+      ) : (
+        <p className="hint balances-form-hint">
+          Podés modificar los importes en cualquier momento y <strong>Guardar saldos</strong> para
+          persistirlos. Miles con punto (27.000.000) o coma decimal (1.234,56). Con{' '}
+          <strong>saldo final banco</strong> y <strong>saldo final empresa</strong> el resumen cierra
+          la auditoría de cierre.
+        </p>
+      )}
+      <div className="balances-columns">
+        <div className="balances-column balances-column--bank">
+          <h4 className="balances-column-title">Banco</h4>
+          <div className="balances-grid balances-grid--column">
+            <label>
+              <span>Saldo inicial</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                readOnly={readOnly}
+                value={openingBankBalance}
+                onChange={(ev) => setOpeningBankBalance(ev.target.value)}
+                autoComplete="off"
+                placeholder="—"
+              />
+            </label>
+            <label>
+              <span>Saldo final</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                readOnly={readOnly}
+                value={closingBankBalance}
+                onChange={(ev) => setClosingBankBalance(ev.target.value)}
+                autoComplete="off"
+                placeholder="—"
+              />
+            </label>
+          </div>
+        </div>
+        <div className="balances-column balances-column--company">
+          <h4 className="balances-column-title">Empresa</h4>
+          <div className="balances-grid balances-grid--column">
+            <label>
+              <span>Saldo inicial</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                readOnly={readOnly}
+                value={openingCompanyBalance}
+                onChange={(ev) => setOpeningCompanyBalance(ev.target.value)}
+                autoComplete="off"
+                placeholder="—"
+              />
+            </label>
+            <label>
+              <span>Saldo final</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                readOnly={readOnly}
+                value={closingCompanyBalance}
+                onChange={(ev) => setClosingCompanyBalance(ev.target.value)}
+                autoComplete="off"
+                placeholder="—"
+              />
+            </label>
+          </div>
+        </div>
+      </div>
+      {!readOnly && (
+        <div className="balances-actions-row balances-actions-row--modal">
+          <button type="submit" className="btn-import balances-save-btn" disabled={saving}>
+            {saving ? 'Guardando…' : 'Guardar saldos'}
+          </button>
+        </div>
+      )}
+      {err && <p className="msg err">{err}</p>}
+    </form>
+  )
+}
+
+function SessionBalancesModal({
+  session,
+  onSaved,
+  readOnly,
+  onClose,
+}: {
+  session: SessionDetail['session']
+  onSaved: () => Promise<void>
+  readOnly: boolean
+  onClose: () => void
+}) {
+  useEffect(() => {
+    function onKey(ev: KeyboardEvent) {
+      if (ev.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
   const loadStatus = balancesLoadStatus(session)
   const tabDetail = balancesTabDetail(session)
 
   return (
-    <section
-      className={
-        expanded
-          ? 'balances-disclosure balances-disclosure--open'
-          : 'balances-disclosure balances-disclosure--collapsed'
-      }
-      aria-labelledby="session-balances-title"
-    >
-      <button
-        type="button"
-        id="session-balances-title"
-        aria-expanded={expanded}
-        className="balances-disclosure-summary"
-        onClick={() => setExpanded((open) => !open)}
+    <div className="comment-modal-backdrop session-balances-backdrop" role="presentation" onClick={onClose}>
+      <div
+        className="comment-modal session-balances-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="session-balances-modal-title"
+        onClick={(ev) => ev.stopPropagation()}
       >
-        <span className="balances-disclosure-title">Saldos del período</span>
-        <span className={`balances-disclosure-badge balances-disclosure-badge--${loadStatus}`}>
-          {BALANCES_STATUS_LABEL[loadStatus]}
-        </span>
-        <span className="balances-disclosure-meta">{tabDetail}</span>
-      </button>
-
-      {expanded && (
-        <div className="balances-disclosure-body">
-          <form
-            className={['balances-form', readOnly && 'balances-form--locked'].filter(Boolean).join(' ')}
-            onSubmit={(e) => void handleSubmit(e)}
-          >
-            {readOnly ? (
-              <p className="hint balances-locked-hint">
-                <strong>Conciliación cerrada:</strong> saldos y clasificación de pendientes en solo lectura.
-              </p>
-            ) : (
-              <p className="hint balances-form-hint">
-                Podés modificar los importes en cualquier momento y <strong>Guardar saldos</strong> para
-                persistirlos. Miles con punto (27.000.000) o coma decimal (1.234,56). Con{' '}
-                <strong>saldo final banco</strong> y <strong>saldo final empresa</strong> el resumen cierra
-                la auditoría de cierre.
-              </p>
-            )}
-            <div className="balances-columns">
-              <div className="balances-column balances-column--bank">
-                <h4 className="balances-column-title">Banco</h4>
-                <div className="balances-grid balances-grid--column">
-                  <label>
-                    <span>Saldo inicial</span>
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      readOnly={readOnly}
-                      value={openingBankBalance}
-                      onChange={(ev) => setOpeningBankBalance(ev.target.value)}
-                      autoComplete="off"
-                      placeholder="—"
-                    />
-                  </label>
-                  <label>
-                    <span>Saldo final</span>
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      readOnly={readOnly}
-                      value={closingBankBalance}
-                      onChange={(ev) => setClosingBankBalance(ev.target.value)}
-                      autoComplete="off"
-                      placeholder="—"
-                    />
-                  </label>
-                </div>
-              </div>
-              <div className="balances-column balances-column--company">
-                <h4 className="balances-column-title">Empresa</h4>
-                <div className="balances-grid balances-grid--column">
-                  <label>
-                    <span>Saldo inicial</span>
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      readOnly={readOnly}
-                      value={openingCompanyBalance}
-                      onChange={(ev) => setOpeningCompanyBalance(ev.target.value)}
-                      autoComplete="off"
-                      placeholder="—"
-                    />
-                  </label>
-                  <label>
-                    <span>Saldo final</span>
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      readOnly={readOnly}
-                      value={closingCompanyBalance}
-                      onChange={(ev) => setClosingCompanyBalance(ev.target.value)}
-                      autoComplete="off"
-                      placeholder="—"
-                    />
-                  </label>
-                </div>
-              </div>
-            </div>
-            {!readOnly && (
-              <div className="balances-actions-row">
-                <button type="submit" className="btn-secondary" disabled={saving}>
-                  {saving ? 'Guardando…' : 'Guardar saldos'}
-                </button>
-              </div>
-            )}
-            {err && <p className="msg err">{err}</p>}
-          </form>
+        <header className="comment-modal-head session-balances-modal-head">
+          <div className="session-balances-modal-head-block">
+            <h3 id="session-balances-modal-title">Saldos del período</h3>
+            <span className={`balances-disclosure-badge balances-disclosure-badge--${loadStatus}`}>
+              {BALANCES_STATUS_LABEL[loadStatus]}
+            </span>
+          </div>
+          <button type="button" className="comment-modal-close" onClick={onClose} aria-label="Cerrar">
+            ×
+          </button>
+        </header>
+        <p className="comment-modal-hint session-balances-modal-hint">{tabDetail}</p>
+        <div className="session-balances-modal-body">
+          <SessionBalancesForm session={session} onSaved={onSaved} readOnly={readOnly} />
         </div>
-      )}
-    </section>
-  )
-}
-
-/** Icono ⓘ con burbuja de ayuda flotante (no desplaza el resto del layout). */
-function HelpPopoverButton({
-  children,
-  ariaLabel = 'Ayuda',
-  dialogLabel = 'Ayuda',
-}: {
-  children: React.ReactNode
-  ariaLabel?: string
-  dialogLabel?: string
-}) {
-  const [open, setOpen] = useState(false)
-  const rootRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!open) return
-    function onPointerDown(ev: MouseEvent) {
-      if (!rootRef.current?.contains(ev.target as Node)) {
-        setOpen(false)
-      }
-    }
-    function onKeyDown(ev: KeyboardEvent) {
-      if (ev.key === 'Escape') setOpen(false)
-    }
-    document.addEventListener('mousedown', onPointerDown)
-    document.addEventListener('keydown', onKeyDown)
-    return () => {
-      document.removeEventListener('mousedown', onPointerDown)
-      document.removeEventListener('keydown', onKeyDown)
-    }
-  }, [open])
-
-  return (
-    <div className="view-help-popover" ref={rootRef}>
-      <button
-        type="button"
-        className={
-          open ? 'view-help-popover-toggle view-help-popover-toggle--open' : 'view-help-popover-toggle'
-        }
-        onClick={() => setOpen((v) => !v)}
-        aria-label={ariaLabel}
-        aria-expanded={open}
-        title="Ayuda"
-      >
-        <InfoCircleIcon className="view-help-popover-icon" />
-      </button>
-      {open && (
-        <div className="view-help-popover-panel hint" role="dialog" aria-label={dialogLabel}>
-          {children}
-        </div>
-      )}
+      </div>
     </div>
   )
 }
@@ -908,7 +914,7 @@ function SubsectionTitleRow({
   )
 }
 
-/** Búsqueda (izquierda) + rango de fechas (derecha) en un solo contenedor, encima de la tabla. */
+/** Búsqueda + clasificación + fechas en una cinta; ayuda y atajos junto al buscador. */
 function CompareFiltersBar({
   searchValue,
   onSearchChange,
@@ -922,6 +928,7 @@ function CompareFiltersBar({
   onDateToChange,
   onClearDates,
   help,
+  keyboardHelp,
 }: {
   searchValue: string
   onSearchChange: (v: string) => void
@@ -935,85 +942,116 @@ function CompareFiltersBar({
   onDateToChange: (v: string) => void
   onClearDates: () => void
   help?: React.ReactNode
+  keyboardHelp?: React.ReactNode
 }) {
   const hasSearch = searchValue.trim() !== ''
+  const hasDates = dateFrom !== '' || dateTo !== ''
+  const hasHelpCluster = help != null || keyboardHelp != null
   return (
     <div
-      className={
-        help
-          ? 'compare-filters-bar compare-filters-bar--above-table compare-filters-bar--with-help'
-          : 'compare-filters-bar compare-filters-bar--above-table'
-      }
+      className={[
+        'compare-filters-bar',
+        'compare-filters-bar--above-table',
+        hasHelpCluster ? 'compare-filters-bar--with-help' : '',
+      ]
+        .filter(Boolean)
+        .join(' ')}
       role="group"
-      aria-label="Buscar y filtrar por fecha"
+      aria-label="Buscar y filtrar"
     >
-      {help && <HelpPopoverButton ariaLabel="Ayuda sobre filtros">{help}</HelpPopoverButton>}
-      <div className="compare-filters-bar__search" role="search" aria-label="Buscar movimientos">
-        <span className="compare-date-toolbar-label">Buscar</span>
-        <div className="compare-filters-search-split">
-          <div className="compare-filters-search-half">
-            <div className="compare-search-controls compare-search-controls--half">
-              <input
-                type="search"
-                className="compare-search-input"
-                value={searchValue}
-                onChange={(ev) => onSearchChange(ev.target.value)}
-                placeholder="ID, referencia, descripción, importe…"
-                aria-label="Buscar por ID, referencia, descripción o importe"
-                autoComplete="off"
-              />
-              {hasSearch && (
-                <button type="button" className="btn-secondary compare-search-clear" onClick={onSearchClear}>
-                  Limpiar
-                </button>
-              )}
-            </div>
-          </div>
-          <div className="compare-filters-search-half">
-            <label className="compare-classif-filter-label">
-              <span className="compare-classif-filter-caption">Clasificación</span>
-              <select
-                className="compare-classif-filter-select"
-                value={classificationValue}
-                onChange={(ev) => onClassificationChange(ev.target.value)}
-                aria-label="Filtrar por clasificación"
+      <div
+        className={[
+          'compare-filters-bar__grid',
+          hasHelpCluster ? 'compare-filters-bar__grid--with-help' : '',
+        ]
+          .filter(Boolean)
+          .join(' ')}
+      >
+        {hasHelpCluster ? (
+          <div className="compare-filters-bar__help">
+            {help ? (
+              <HelpPopoverButton ariaLabel="Ayuda sobre filtros y vista" dialogLabel="Ayuda">
+                {help}
+              </HelpPopoverButton>
+            ) : null}
+            {keyboardHelp ? (
+              <HelpPopoverButton
+                variant="keyboard"
+                ariaLabel="Atajos de teclado"
+                dialogLabel="Atajos de teclado"
               >
-                <option value="">Todas</option>
-                {classificationOptions.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-              </select>
-            </label>
+                {keyboardHelp}
+              </HelpPopoverButton>
+            ) : null}
+          </div>
+        ) : null}
+
+        <span className="compare-filters-field-label">Buscar</span>
+        <span className="compare-filters-field-label">Clasificación</span>
+        <span className="compare-filters-field-label">Desde</span>
+        <span className="compare-filters-field-label">Hasta</span>
+        <span className="compare-filters-field-label compare-filters-field-label--actions" aria-hidden />
+
+        <div className="compare-filters-field compare-filters-field--search" role="search">
+          <div className="compare-search-controls">
+            <input
+              type="search"
+              className="compare-search-input"
+              value={searchValue}
+              onChange={(ev) => onSearchChange(ev.target.value)}
+              placeholder="ID, referencia, descripción, importe…"
+              aria-label="Buscar por ID, referencia, descripción o importe"
+              autoComplete="off"
+            />
+            {hasSearch ? (
+              <button type="button" className="btn-secondary compare-search-clear" onClick={onSearchClear}>
+                Limpiar
+              </button>
+            ) : null}
           </div>
         </div>
-      </div>
-      <div className="compare-filters-bar__dates" aria-label="Filtrar filas por fecha">
-        <span className="compare-date-toolbar-label">Filtrar por fecha</span>
-        <label className="compare-date-field">
-          <span>Desde</span>
+
+        <div className="compare-filters-field compare-filters-field--classif">
+          <select
+            className="compare-classif-filter-select"
+            value={classificationValue}
+            onChange={(ev) => onClassificationChange(ev.target.value)}
+            aria-label="Filtrar por clasificación"
+          >
+            <option value="">Todas</option>
+            {classificationOptions.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="compare-filters-field compare-filters-field--date">
           <input
             type="date"
             value={dateFrom}
             onChange={(ev) => onDateFromChange(ev.target.value)}
             aria-label="Fecha desde"
           />
-        </label>
-        <label className="compare-date-field">
-          <span>Hasta</span>
+        </div>
+
+        <div className="compare-filters-field compare-filters-field--date">
           <input
             type="date"
             value={dateTo}
             onChange={(ev) => onDateToChange(ev.target.value)}
             aria-label="Fecha hasta"
           />
-        </label>
-        {(dateFrom !== '' || dateTo !== '') && (
-          <button type="button" className="btn-secondary compare-date-clear" onClick={onClearDates}>
-            Quitar fechas
-          </button>
-        )}
+        </div>
+
+        <div className="compare-filters-field compare-filters-field--actions">
+          {hasDates ? (
+            <button type="button" className="btn-secondary compare-date-clear" onClick={onClearDates}>
+              Quitar fechas
+            </button>
+          ) : null}
+        </div>
       </div>
     </div>
   )
@@ -1067,6 +1105,31 @@ function buildComparisonRows(
         company,
       }
     })
+  const groupRows: ComparisonRow[] = (detail.groups ?? [])
+    .map((g) => {
+      const banks = g.bankTxIds
+        .map((id) => bankMap.get(id))
+        .filter((m): m is MovimientoDto => m != null)
+      const companies = g.companyTxIds
+        .map((id) => companyMap.get(id))
+        .filter((m): m is MovimientoDto => m != null)
+      const group: GroupDto = {
+        ...g,
+        pairKind: effectivePairKindFromAmounts(g.bankSum, g.companySum, tol),
+      }
+      return {
+        key: `group-${g.groupId}`,
+        kind: 'group' as const,
+        group,
+        banks,
+        companies,
+      }
+    })
+    .sort((a, b) => {
+      const da = a.group.bankMinDate ?? a.group.companyMinDate ?? ''
+      const db = b.group.bankMinDate ?? b.group.companyMinDate ?? ''
+      return da.localeCompare(db)
+    })
   const ub = [...detail.unmatchedBankTransactions]
     .sort((a, b) => a.txDate.localeCompare(b.txDate))
     .map(
@@ -1085,7 +1148,7 @@ function buildComparisonRows(
         m,
       }),
     )
-  return [...pairRows, ...ub, ...uc]
+  return [...pairRows, ...groupRows, ...ub, ...uc]
 }
 
 /** Fecha usada para ordenar la fila en la vista completa (cronológica). */
@@ -1093,11 +1156,15 @@ function rowTimelineSortDate(row: ComparisonRow): string {
   if (row.kind === 'pair') {
     return row.bank.txDate <= row.company.txDate ? row.bank.txDate : row.company.txDate
   }
+  if (row.kind === 'group') {
+    const dates = [...row.banks.map((m) => m.txDate), ...row.companies.map((m) => m.txDate)].sort()
+    return dates[0] ?? ''
+  }
   return row.m.txDate
 }
 
 function timelineKindOrder(row: ComparisonRow): number {
-  if (row.kind === 'pair') return 0
+  if (row.kind === 'pair' || row.kind === 'group') return 0
   if (row.kind === 'unmatchedBank') return 1
   return 2
 }
@@ -1124,6 +1191,12 @@ function rowClassForComparison(
     if (k === 'OPPOSITE_SIGN') return 'row--opp-sign'
     if (k != null && pairKindShowsAmountDifference(k)) return 'row--amount-gap'
     return row.pair.matchSource === 'MANUAL' ? 'row--manual' : 'row--auto'
+  }
+  if (row.kind === 'group') {
+    const k = pairKindForComparisonRow(row, sessionTolerance)
+    if (k === 'OPPOSITE_SIGN') return 'row--opp-sign row--group'
+    if (k != null && pairKindShowsAmountDifference(k)) return 'row--amount-gap row--group'
+    return row.group.matchSource === 'MANUAL' ? 'row--manual row--group' : 'row--auto row--group'
   }
   if (row.kind === 'unmatchedBank') return 'row--pend-bank'
   return 'row--pend-company'
@@ -1156,6 +1229,11 @@ function rowMatchesFilter(
   }
   if (f === 'deferred-in') {
     return comparisonRowHasDeferredOrigin(row)
+  }
+  if (row.kind === 'group') {
+    if (f === 'auto') return row.group.matchSource !== 'MANUAL'
+    if (f === 'manual') return row.group.matchSource === 'MANUAL'
+    return false
   }
   if (row.kind === 'pair') {
     if (f === 'auto') return row.pair.matchSource !== 'MANUAL'
@@ -1198,6 +1276,11 @@ function rowMatchesDateRange(
     const b = normalizeRowDate(row.company.txDate)
     if (a) dates.push(a)
     if (b) dates.push(b)
+  } else if (row.kind === 'group') {
+    for (const m of [...row.banks, ...row.companies]) {
+      const d = normalizeRowDate(m.txDate)
+      if (d) dates.push(d)
+    }
   } else {
     const d = normalizeRowDate(row.m.txDate)
     if (d) dates.push(d)
@@ -1227,8 +1310,9 @@ function compareFilterCounts(
   let deferredIn = 0
   for (const r of rows) {
     if (comparisonRowHasDeferredOrigin(r)) deferredIn += 1
-    if (r.kind === 'pair') {
-      if (r.pair.matchSource === 'MANUAL') manual += 1
+    if (r.kind === 'pair' || r.kind === 'group') {
+      const manualMatch = r.kind === 'pair' ? r.pair.matchSource === 'MANUAL' : r.group.matchSource === 'MANUAL'
+      if (manualMatch) manual += 1
       else auto += 1
       const k = pairKindForComparisonRow(r, sessionTolerance)
       if (k != null && pairKindShowsAmountDifference(k)) amountGap += 1
@@ -1356,7 +1440,7 @@ function ComparisonLegend({
             className={
               filter === id ? 'compare-legend-btn compare-legend-btn--active' : 'compare-legend-btn'
             }
-            onClick={() => onFilter(id)}
+            onClick={() => onFilter(filter === id ? 'all' : id)}
           >
             {swatch ? (
               <span className={`compare-swatch ${swatch}`} aria-hidden />
@@ -1539,6 +1623,14 @@ function pairAttachmentFileUrl(sessionId: number, pairId: number, attachmentId: 
   return `/api/v1/conciliacion/sessions/${sessionId}/pares/${pairId}/adjuntos/${attachmentId}/archivo`
 }
 
+function groupAttachmentsListUrl(sessionId: number, groupId: number): string {
+  return `/api/v1/conciliacion/sessions/${sessionId}/grupos/${groupId}/adjuntos`
+}
+
+function groupAttachmentFileUrl(sessionId: number, groupId: number, attachmentId: number): string {
+  return `/api/v1/conciliacion/sessions/${sessionId}/grupos/${groupId}/adjuntos/${attachmentId}/archivo`
+}
+
 /** Vista ampliada encima del modal de adjuntos; Escape o clic fuera cierra. La imagen se carga con Bearer (blob). */
 function ImagePreviewLightbox({
   apiPath,
@@ -1636,6 +1728,13 @@ type PendingAttachmentSidePanelProps =
       sessionClosed: boolean
       onAfterChange: () => void
     }
+  | {
+      kind: 'group'
+      sessionId: number
+      groupId: number
+      sessionClosed: boolean
+      onAfterChange: () => void
+    }
 
 function PendingAttachmentSidePanel(props: PendingAttachmentSidePanelProps) {
   const [items, setItems] = useState<MovementAttachmentDto[]>([])
@@ -1649,7 +1748,9 @@ function PendingAttachmentSidePanel(props: PendingAttachmentSidePanelProps) {
   const listUrl =
     props.kind === 'pair'
       ? pairAttachmentsListUrl(props.sessionId, props.pairId)
-      : attachmentsListUrl(props.sessionId, props.side, props.txId)
+      : props.kind === 'group'
+        ? groupAttachmentsListUrl(props.sessionId, props.groupId)
+        : attachmentsListUrl(props.sessionId, props.side, props.txId)
 
   useEffect(() => {
     let cancelled = false
@@ -1714,6 +1815,9 @@ function PendingAttachmentSidePanel(props: PendingAttachmentSidePanelProps) {
   function fileUrlFor(a: MovementAttachmentDto): string {
     if (props.kind === 'pair') {
       return pairAttachmentFileUrl(props.sessionId, props.pairId, a.id)
+    }
+    if (props.kind === 'group') {
+      return groupAttachmentFileUrl(props.sessionId, props.groupId, a.id)
     }
     return attachmentFileUrl(props.sessionId, props.side, props.txId, a.id)
   }
@@ -1871,6 +1975,41 @@ function PendingAttachmentsModal({
             kind="pair"
             sessionId={sessionId}
             pairId={target.pairId}
+            sessionClosed={sessionClosed}
+            onAfterChange={onAfterChange}
+          />
+        </div>
+      </div>
+    )
+  }
+
+  if (target.kind === 'group') {
+    return (
+      <div className="comment-modal-backdrop" role="presentation" onClick={onClose}>
+        <div
+          className="comment-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="attachment-modal-title"
+          onClick={(ev) => ev.stopPropagation()}
+        >
+          <header className="comment-modal-head">
+            <h3 id="attachment-modal-title">Adjuntos del grupo conciliado</h3>
+            <button type="button" className="comment-modal-close" onClick={onClose} aria-label="Cerrar">
+              ×
+            </button>
+          </header>
+          <p className="comment-modal-hint">
+            Comprobantes del grupo N:M (todos los movimientos vinculados). PDF o imagen (PNG, JPG, WEBP, GIF), máx. 20
+            MB.
+          </p>
+          {sessionClosed && (
+            <p className="msg subtle comment-modal-readonly">Conciliación cerrada: solo lectura y descarga.</p>
+          )}
+          <PendingAttachmentSidePanel
+            kind="group"
+            sessionId={sessionId}
+            groupId={target.groupId}
             sessionClosed={sessionClosed}
             onAfterChange={onAfterChange}
           />
@@ -2208,6 +2347,139 @@ function PairCommentPanel({
   )
 }
 
+function GroupCommentPanel({
+  sessionId,
+  groupId,
+  sessionClosed,
+  onAfterChange,
+}: {
+  sessionId: number
+  groupId: number
+  sessionClosed: boolean
+  onAfterChange: () => void
+}) {
+  const [items, setItems] = useState<PendingCommentDto[]>([])
+  const [loading, setLoading] = useState(false)
+  const [posting, setPosting] = useState(false)
+  const [draft, setDraft] = useState('')
+  const [fetchError, setFetchError] = useState<string | null>(null)
+  const [postError, setPostError] = useState<string | null>(null)
+  const threadScrollRef = useRef<HTMLDivElement>(null)
+
+  const scrollThreadToBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {
+    const el = threadScrollRef.current
+    if (!el) return
+    const run = () => {
+      el.scrollTo({ top: el.scrollHeight, behavior })
+    }
+    requestAnimationFrame(() => {
+      requestAnimationFrame(run)
+    })
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    async function load() {
+      setLoading(true)
+      setFetchError(null)
+      setPostError(null)
+      try {
+        const r = await apiFetch(`/api/v1/conciliacion/sessions/${sessionId}/grupos/${groupId}/comentarios`)
+        if (!r.ok) throw new Error(await parseError(r))
+        const data = (await r.json()) as PendingCommentDto[]
+        if (!cancelled) setItems(data)
+      } catch (e) {
+        if (!cancelled) setFetchError(e instanceof Error ? e.message : String(e))
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    void load()
+    return () => {
+      cancelled = true
+    }
+  }, [sessionId, groupId])
+
+  useEffect(() => {
+    if (loading) return
+    scrollThreadToBottom('smooth')
+  }, [loading, items, scrollThreadToBottom])
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (sessionClosed) return
+    const text = draft.trim()
+    if (!text) return
+    setPosting(true)
+    setPostError(null)
+    try {
+      const r = await apiFetch(`/api/v1/conciliacion/sessions/${sessionId}/grupos/${groupId}/comentarios`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+      })
+      if (!r.ok) throw new Error(await parseError(r))
+      const created = (await r.json()) as PendingCommentDto
+      setItems((prev) => [...prev, created])
+      setDraft('')
+      onAfterChange()
+    } catch (e) {
+      setPostError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setPosting(false)
+    }
+  }
+
+  return (
+    <div>
+      <div ref={threadScrollRef} className="comment-thread-scroll" tabIndex={0}>
+        {loading && <p className="msg subtle">Cargando…</p>}
+        {!loading && fetchError && <p className="msg err">{fetchError}</p>}
+        {!loading && !fetchError && items.length === 0 && (
+          <p className="msg subtle">Todavía no hay mensajes. Escribí uno abajo.</p>
+        )}
+        {!loading &&
+          !fetchError &&
+          items.map((c) => (
+            <article key={c.id} className="comment-bubble">
+              <div className="comment-bubble-meta">
+                <span className="comment-bubble-author">{formatCommentAuthor(c.createdByUsername)}</span>
+                <time className="comment-bubble-time" dateTime={c.createdAt}>
+                  {formatCommentWhen(c.createdAt)}
+                </time>
+              </div>
+              <p className="comment-bubble-body">{c.body}</p>
+            </article>
+          ))}
+      </div>
+      <form className="comment-modal-form" onSubmit={(e) => void handleSubmit(e)}>
+        <label className="comment-modal-label">
+          <span>Nuevo mensaje</span>
+          <textarea
+            className="comment-modal-input"
+            rows={4}
+            value={draft}
+            disabled={sessionClosed || posting}
+            onChange={(ev) => setDraft(ev.target.value)}
+            placeholder="Ej.: acordamos el ajuste por comisión bancaria…"
+            maxLength={4000}
+          />
+        </label>
+        {postError && <p className="msg err comment-modal-form-err">{postError}</p>}
+        <div className="comment-modal-actions">
+          <button
+            type="submit"
+            className="btn-import"
+            disabled={sessionClosed || posting || draft.trim() === ''}
+          >
+            {posting ? 'Enviando…' : 'Enviar'}
+          </button>
+        </div>
+      </form>
+    </div>
+  )
+}
+
 function SessionActivityModal({
   sessionId,
   entries,
@@ -2357,6 +2629,39 @@ function PendingCommentsModal({
     )
   }
 
+  if (target.kind === 'group') {
+    return (
+      <div className="comment-modal-backdrop" role="presentation" onClick={onClose}>
+        <div
+          className="comment-modal comment-modal--pair"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="comment-modal-title"
+          onClick={(ev) => ev.stopPropagation()}
+        >
+          <header className="comment-modal-head">
+            <h3 id="comment-modal-title">Comentarios del grupo conciliado</h3>
+            <button type="button" className="comment-modal-close" onClick={onClose} aria-label="Cerrar">
+              ×
+            </button>
+          </header>
+          <p className="comment-modal-hint">
+            Un solo hilo por fila de grupo N:M (todos los movimientos vinculados).
+          </p>
+          {sessionClosed && (
+            <p className="msg subtle comment-modal-readonly">Conciliación cerrada: solo lectura.</p>
+          )}
+          <GroupCommentPanel
+            sessionId={sessionId}
+            groupId={target.groupId}
+            sessionClosed={sessionClosed}
+            onAfterChange={onAfterChange}
+          />
+        </div>
+      </div>
+    )
+  }
+
   const sideLabel = target.side === 'bank' ? 'Banco' : 'Empresa'
 
   return (
@@ -2421,16 +2726,36 @@ function CompareEstadoChip({
   title,
   className,
   onClick,
+  active,
 }: {
   abbr: string
   title: string
   className: string
   onClick?: () => void
+  active?: boolean
 }) {
-  const cls = `${className} compare-estado-chip${onClick ? ' compare-hint-btn' : ''}`
+  const cls = [
+    className,
+    'compare-estado-chip',
+    onClick ? 'compare-hint-btn' : '',
+    active ? 'compare-estado-chip--selected' : '',
+  ]
+    .filter(Boolean)
+    .join(' ')
   if (onClick) {
     return (
-      <button type="button" className={cls} title={title} aria-label={title} onClick={onClick}>
+      <button
+        type="button"
+        className={cls}
+        title={title}
+        aria-label={title}
+        aria-pressed={active ?? false}
+        onMouseDown={(ev) => ev.preventDefault()}
+        onClick={(ev) => {
+          ev.preventDefault()
+          onClick()
+        }}
+      >
         {abbr}
       </button>
     )
@@ -2439,6 +2764,48 @@ function CompareEstadoChip({
     <span className={cls} title={title} aria-label={title}>
       {abbr}
     </span>
+  )
+}
+
+function CompareLinkPickCell({
+  side,
+  txId,
+  linkMode,
+  onTogglePending,
+  className,
+  children,
+}: {
+  side: 'bank' | 'company'
+  txId: number
+  linkMode?: boolean
+  onTogglePending?: (side: 'bank' | 'company', txId: number) => void
+  className?: string
+  children: ReactNode
+}) {
+  const pickable = linkMode && onTogglePending != null
+  const cls = [
+    className,
+    pickable ? 'compare-td-link-pick' : '',
+    pickable ? `compare-td-link-pick--${side}` : '',
+  ]
+    .filter(Boolean)
+    .join(' ')
+
+  if (!pickable) {
+    return <td className={cls || undefined}>{children}</td>
+  }
+
+  const title = 'Clic para seleccionar o quitar este pendiente'
+
+  return (
+    <td
+      className={cls}
+      title={title}
+      onMouseDown={(ev) => ev.preventDefault()}
+      onClick={() => onTogglePending(side, txId)}
+    >
+      {children}
+    </td>
   )
 }
 
@@ -2477,6 +2844,25 @@ function PendingHintBadges({
   )
 }
 
+const COMPARE_TABLE_COL_COUNT = 14
+
+/** Mide 14 columnas lógicas a partir de la primera fila del tbody (respeta colSpan). */
+function measureCompareTableColumnWidths(table: HTMLTableElement): number[] | null {
+  for (const tr of table.querySelectorAll('tbody tr')) {
+    const widths: number[] = []
+    for (const td of tr.querySelectorAll(':scope > td')) {
+      const cell = td as HTMLTableCellElement
+      const span = cell.colSpan > 0 ? cell.colSpan : 1
+      const wEach = cell.getBoundingClientRect().width / span
+      for (let i = 0; i < span; i += 1) {
+        widths.push(Math.round(wEach * 10) / 10)
+      }
+    }
+    if (widths.length === COMPARE_TABLE_COL_COUNT) return widths
+  }
+  return null
+}
+
 function ComparisonTable({
   rows,
   allRowsCount,
@@ -2488,12 +2874,18 @@ function ComparisonTable({
   sessionAmountTolerance,
   classificationSuggestions,
   onUnlinkPair,
+  onUnlinkGroup,
   onSetClassification,
   onSetPairClassification,
+  onSetGroupClassification,
   onOpenPendingComments,
   onOpenPendingAttachments,
   onInspectCounterpart,
   onDeferMovement,
+  linkMode,
+  selectedBankIds,
+  selectedCompanyIds,
+  onTogglePending,
 }: {
   rows: ComparisonRow[]
   /** Total sin filtrar; si es 0 la sesión está vacía. */
@@ -2510,9 +2902,12 @@ function ComparisonTable({
   /** Clasificaciones ya usadas en la sesión (sugerencias al escribir). */
   classificationSuggestions: readonly string[]
   onUnlinkPair: (pairId: number, matchSource: 'MANUAL' | 'AUTO') => void
+  onUnlinkGroup?: (groupId: number) => void
   onSetClassification: (side: 'bank' | 'company', txId: number, classification: string) => void
   /** Una sola clasificación por fila de par conciliado. */
   onSetPairClassification: (pairId: number, classification: string) => void
+  /** Una sola clasificación por fila de grupo N:M. */
+  onSetGroupClassification: (groupId: number, classification: string) => void
   /** Conversación archivada por movimiento pendiente o por par (un solo control por fila conciliada). */
   onOpenPendingComments?: (target: PendingThreadTarget) => void
   /** Comprobantes adjuntos al pendiente o al par. */
@@ -2521,10 +2916,82 @@ function ComparisonTable({
   onInspectCounterpart?: (req: CounterpartInspectRequest) => void
   /** Diferir pendiente a la bolsa para la próxima conciliación. */
   onDeferMovement?: (side: 'bank' | 'company', txId: number) => void
+  /** Selección de pendientes para vincular / agrupar. */
+  linkMode?: boolean
+  selectedBankIds?: ReadonlySet<number>
+  selectedCompanyIds?: ReadonlySet<number>
+  onTogglePending?: (side: 'bank' | 'company', txId: number) => void
 }) {
+  const tableRef = useRef<HTMLTableElement>(null)
+  const [lockedColWidths, setLockedColWidths] = useState<number[] | null>(null)
+  const [expandedGroupSides, setExpandedGroupSides] = useState<Set<string>>(() => new Set())
+
+  useEffect(() => {
+    setLockedColWidths(null)
+  }, [sessionId, allRowsCount])
+
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const onResize = () => {
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(() => setLockedColWidths(null), 200)
+    }
+    window.addEventListener('resize', onResize)
+    return () => {
+      window.removeEventListener('resize', onResize)
+      if (timer) clearTimeout(timer)
+    }
+  }, [])
+
+  const canCaptureColumnLayout = rows.length > 0 && rows.length === allRowsCount
+
+  useLayoutEffect(() => {
+    if (lockedColWidths != null || !canCaptureColumnLayout) return
+    const table = tableRef.current
+    if (!table) return
+    const widths = measureCompareTableColumnWidths(table)
+    if (widths) setLockedColWidths(widths)
+  }, [canCaptureColumnLayout, lockedColWidths, rows])
+
+  useEffect(() => {
+    const validGroupKeys = new Set(rows.filter((r) => r.kind === 'group').map((r) => r.key))
+    setExpandedGroupSides((prev) => {
+      const next = new Set(
+        [...prev].filter((k) => {
+          const sep = k.lastIndexOf('::')
+          if (sep < 0) return false
+          const rowKey = k.slice(0, sep)
+          const side = k.slice(sep + 2)
+          return validGroupKeys.has(rowKey) && (side === 'bank' || side === 'company')
+        }),
+      )
+      return next.size === prev.size ? prev : next
+    })
+  }, [rows])
+
+  function toggleGroupSideExpand(key: string, side: 'bank' | 'company') {
+    const sideKey = compareGroupSideKey(key, side)
+    setExpandedGroupSides((prev) => {
+      const next = new Set(prev)
+      if (next.has(sideKey)) next.delete(sideKey)
+      else next.add(sideKey)
+      return next
+    })
+  }
+
   return (
     <div className="table-wrap compare-table-wrap table-wrap--scrollY">
-      <table className="data-table compare-table">
+      <table
+        ref={tableRef}
+        className={`data-table compare-table${lockedColWidths ? ' compare-table--cols-locked' : ''}`}
+      >
+        {lockedColWidths ? (
+          <colgroup>
+            {lockedColWidths.map((w, i) => (
+              <col key={i} style={{ width: `${w}px` }} />
+            ))}
+          </colgroup>
+        ) : null}
         <thead>
           <tr>
             <th rowSpan={2} className="rownum-th" aria-label="Número de fila">
@@ -2548,7 +3015,7 @@ function ComparisonTable({
             <th rowSpan={2} className="compare-th-notes" scope="col" title="Notas, adjuntos y diferir a próxima conciliación">
               Notas
             </th>
-            <th rowSpan={2}></th>
+            <th rowSpan={2} className="compare-th-unlink" scope="col" aria-label="Desvincular par o grupo"></th>
           </tr>
           <tr>
             <th>ID</th>
@@ -2611,7 +3078,9 @@ function ComparisonTable({
                       {[company.reference, company.description].filter(Boolean).join(' · ') ||
                         '—'}
                     </td>
-                    <td className="compare-delta">{deltaStr}</td>
+                    <td className="compare-delta" title={deltaStr}>
+                      {deltaStr}
+                    </td>
                     <td className="compare-td-clasif-pair">
                       <ClassificationCombo
                         value={pair.classification ?? undefined}
@@ -2664,28 +3133,124 @@ function ComparisonTable({
                   </tr>
                 )
               }
+              if (row.kind === 'group') {
+                const { group } = row
+                return (
+                  <CompareGroupTableRows
+                    key={row.key}
+                    row={row}
+                    rowNum={idx + 1}
+                    rowClass={cls}
+                    expandedBank={expandedGroupSides.has(compareGroupSideKey(row.key, 'bank'))}
+                    expandedCompany={expandedGroupSides.has(compareGroupSideKey(row.key, 'company'))}
+                    onToggleBankExpand={() => toggleGroupSideExpand(row.key, 'bank')}
+                    onToggleCompanyExpand={() => toggleGroupSideExpand(row.key, 'company')}
+                    sessionAmountTolerance={sessionAmountTolerance}
+                    classificationReadOnly={classificationReadOnly}
+                    sessionClosed={sessionClosed}
+                    selectedId={selectedId}
+                    onUnlinkGroup={onUnlinkGroup}
+                    classificationSuggestions={classificationSuggestions}
+                    onSetGroupClassification={onSetGroupClassification}
+                    notesTools={
+                      <div className="compare-pending-tools">
+                        {onOpenPendingComments ? (
+                          <PendingConversationButton
+                            commentCount={group.groupCommentCount ?? 0}
+                            onClick={() =>
+                              onOpenPendingComments({
+                                kind: 'group',
+                                groupId: group.groupId,
+                              })
+                            }
+                          />
+                        ) : null}
+                        {onOpenPendingAttachments ? (
+                          <PendingAttachmentButton
+                            attachmentCount={group.groupAttachmentCount ?? 0}
+                            onClick={() =>
+                              onOpenPendingAttachments({
+                                kind: 'group',
+                                groupId: group.groupId,
+                              })
+                            }
+                          />
+                        ) : null}
+                        {shareRef ? <ShareInChatButton shareRef={shareRef} /> : null}
+                      </div>
+                    }
+                  />
+                )
+              }
               if (row.kind === 'unmatchedBank') {
                 const { m } = row
+                const pendingSelected = linkMode && (selectedBankIds?.has(m.id) ?? false)
                 return (
-                  <tr key={row.key} data-row-key={row.key} className={cls}>
+                  <tr
+                    key={row.key}
+                    data-row-key={row.key}
+                    className={[cls, pendingSelected ? 'compare-row--link-selected' : '']
+                      .filter(Boolean)
+                      .join(' ')}
+                  >
                     <td className="rownum-td">{idx + 1}</td>
                     <td className="compare-td-tipo compare-td-tipo--stack">
                       <CompareEstadoChips>
                         <CompareEstadoChip
                           abbr="PB"
-                          title="Pendiente banco"
+                          title={
+                            linkMode
+                              ? pendingSelected
+                                ? 'Quitar selección · Enter confirma vínculo'
+                                : 'Seleccionar para vincular · Enter confirma'
+                              : 'Pendiente banco'
+                          }
                           className="compare-badge compare-badge--estado compare-badge--warn"
+                          active={pendingSelected}
+                          onClick={
+                            linkMode && onTogglePending
+                              ? () => onTogglePending('bank', m.id)
+                              : undefined
+                          }
                         />
                         <PendingHintBadges m={m} side="bank" onInspect={onInspectCounterpart} />
                         <DeferredOriginChips movements={[m]} />
                       </CompareEstadoChips>
                     </td>
-                    <td>{m.id}</td>
-                    <td className="cell-date-nowrap">{formatDisplayDate(m.txDate)}</td>
-                    <td>{m.amount}</td>
-                    <td className="compare-td-split-edge cell-desc">
+                    <CompareLinkPickCell
+                      side="bank"
+                      txId={m.id}
+                      linkMode={linkMode}
+                      onTogglePending={onTogglePending}
+                    >
+                      {m.id}
+                    </CompareLinkPickCell>
+                    <CompareLinkPickCell
+                      side="bank"
+                      txId={m.id}
+                      linkMode={linkMode}
+                      onTogglePending={onTogglePending}
+                      className="cell-date-nowrap"
+                    >
+                      {formatDisplayDate(m.txDate)}
+                    </CompareLinkPickCell>
+                    <CompareLinkPickCell
+                      side="bank"
+                      txId={m.id}
+                      linkMode={linkMode}
+                      onTogglePending={onTogglePending}
+                    >
+                      {m.amount}
+                    </CompareLinkPickCell>
+                    <CompareLinkPickCell
+                      side="bank"
+                      txId={m.id}
+                      linkMode={linkMode}
+                      onTogglePending={onTogglePending}
+                      className="compare-td-split-edge cell-desc"
+                    >
                       {[m.reference, m.description].filter(Boolean).join(' · ') || '—'}
-                    </td>
+                    </CompareLinkPickCell>
                     <td colSpan={4} className="compare-td-split-start compare-muted">
                       —
                     </td>
@@ -2728,15 +3293,34 @@ function ComparisonTable({
                 )
               }
               const { m } = row
+              const pendingSelected = linkMode && (selectedCompanyIds?.has(m.id) ?? false)
               return (
-                <tr key={row.key} data-row-key={row.key} className={cls}>
+                <tr
+                  key={row.key}
+                  data-row-key={row.key}
+                  className={[cls, pendingSelected ? 'compare-row--link-selected' : '']
+                    .filter(Boolean)
+                    .join(' ')}
+                >
                   <td className="rownum-td">{idx + 1}</td>
                   <td className="compare-td-tipo compare-td-tipo--stack">
                     <CompareEstadoChips>
                       <CompareEstadoChip
                         abbr="PE"
-                        title="Pendiente empresa"
+                        title={
+                          linkMode
+                            ? pendingSelected
+                              ? 'Quitar selección · Enter confirma vínculo'
+                              : 'Seleccionar para vincular · Enter confirma'
+                            : 'Pendiente empresa'
+                        }
                         className="compare-badge compare-badge--estado compare-badge--company"
+                        active={pendingSelected}
+                        onClick={
+                          linkMode && onTogglePending
+                            ? () => onTogglePending('company', m.id)
+                            : undefined
+                        }
                       />
                       <PendingHintBadges m={m} side="company" onInspect={onInspectCounterpart} />
                       <DeferredOriginChips movements={[m]} />
@@ -2745,12 +3329,40 @@ function ComparisonTable({
                   <td colSpan={4} className="compare-td-split-edge compare-muted">
                     —
                   </td>
-                  <td>{m.id}</td>
-                  <td className="cell-date-nowrap">{formatDisplayDate(m.txDate)}</td>
-                  <td>{m.amount}</td>
-                  <td className="cell-desc">
+                  <CompareLinkPickCell
+                    side="company"
+                    txId={m.id}
+                    linkMode={linkMode}
+                    onTogglePending={onTogglePending}
+                  >
+                    {m.id}
+                  </CompareLinkPickCell>
+                  <CompareLinkPickCell
+                    side="company"
+                    txId={m.id}
+                    linkMode={linkMode}
+                    onTogglePending={onTogglePending}
+                    className="cell-date-nowrap"
+                  >
+                    {formatDisplayDate(m.txDate)}
+                  </CompareLinkPickCell>
+                  <CompareLinkPickCell
+                    side="company"
+                    txId={m.id}
+                    linkMode={linkMode}
+                    onTogglePending={onTogglePending}
+                  >
+                    {m.amount}
+                  </CompareLinkPickCell>
+                  <CompareLinkPickCell
+                    side="company"
+                    txId={m.id}
+                    linkMode={linkMode}
+                    onTogglePending={onTogglePending}
+                    className="cell-desc"
+                  >
                     {[m.reference, m.description].filter(Boolean).join(' · ') || '—'}
-                  </td>
+                  </CompareLinkPickCell>
                   <td className="compare-muted">—</td>
                   <td>
                     <ClassificationCombo
@@ -2981,8 +3593,6 @@ export default function ConciliacionPage() {
   const [conciliarResult, setConciliarResult] = useState<ConciliacionRunResult | null>(null)
   const [conciliarError, setConciliarError] = useState<string | null>(null)
 
-  const [manualBankId, setManualBankId] = useState('')
-  const [manualCompanyId, setManualCompanyId] = useState('')
   const [manualLoading, setManualLoading] = useState(false)
   const [manualError, setManualError] = useState<string | null>(null)
   const [closeSessionLoading, setCloseSessionLoading] = useState(false)
@@ -2994,6 +3604,7 @@ export default function ConciliacionPage() {
   const [activityEntries, setActivityEntries] = useState<SessionAuditEntry[]>([])
   const [activityLoading, setActivityLoading] = useState(false)
   const [activityError, setActivityError] = useState<string | null>(null)
+  const [balancesModalOpen, setBalancesModalOpen] = useState(false)
 
   const [detailLayout, setDetailLayout] = useState<
     'classic' | 'compare' | 'complete' | 'rubro' | 'ledger'
@@ -3006,6 +3617,7 @@ export default function ConciliacionPage() {
 
   const [commentTarget, setCommentTarget] = useState<PendingThreadTarget | null>(null)
   const [attachmentTarget, setAttachmentTarget] = useState<PendingAttachmentTarget | null>(null)
+  const [comparePairLinkOpen, setComparePairLinkOpen] = useState(false)
   const [counterpartInspect, setCounterpartInspect] = useState<CounterpartInspectRequest | null>(
     null,
   )
@@ -3016,6 +3628,7 @@ export default function ConciliacionPage() {
   const selectSession = useCallback(
     (sessionId: number | null) => {
       setSelectedId(sessionId)
+      setBalancesModalOpen(false)
       setSearchParams(
         (prev) => {
           const next = new URLSearchParams(prev)
@@ -3144,6 +3757,10 @@ export default function ConciliacionPage() {
       const c = p.classification?.trim()
       if (c) s.add(c)
     }
+    for (const g of detail.groups ?? []) {
+      const c = g.classification?.trim()
+      if (c) s.add(c)
+    }
     return Array.from(s).sort((a, b) => a.localeCompare(b, 'es'))
   }, [detail])
 
@@ -3161,6 +3778,88 @@ export default function ConciliacionPage() {
   const classificationReadOnly = sessionClosed || user?.role === 'CONSULTA'
   const reconcileLocked =
     detailLoading || (detailMatchesSelection && detail.session.status === 'CLOSED')
+
+  const compareLinkableBank = useMemo(
+    () => (detail ? allBankMovementRefs(detail).filter(isRubroMovementLinkable) : []),
+    [detail],
+  )
+  const compareLinkableCompany = useMemo(
+    () => (detail ? allCompanyMovementRefs(detail).filter(isRubroMovementLinkable) : []),
+    [detail],
+  )
+
+  const compareLinkMode =
+    detailLayout === 'compare' &&
+    !reconcileLocked &&
+    compareLinkableBank.length > 0 &&
+    compareLinkableCompany.length > 0
+
+  const compareLinkPickerResetKey = useMemo(
+    () =>
+      detail
+        ? [
+            detail.session.id,
+            ...compareLinkableBank.map((i) => i.m.id),
+            ...compareLinkableCompany.map((i) => i.m.id),
+          ].join('|')
+        : '',
+    [detail, compareLinkableBank, compareLinkableCompany],
+  )
+
+  const {
+    selectedBankIds: compareSelectedBankIds,
+    selectedCompanyIds: compareSelectedCompanyIds,
+    selectedBank: compareSelectedBank,
+    selectedCompany: compareSelectedCompany,
+    toggleBank: compareToggleBank,
+    toggleCompany: compareToggleCompany,
+    clearSelection: clearCompareLinkSelection,
+    bankSum: compareBankSum,
+    companySum: compareCompanySum,
+    delta: compareDelta,
+    hasBank: compareHasBank,
+    hasCompany: compareHasCompany,
+    bothSides: compareBothSides,
+    canGroupLink: compareCanGroupLink,
+    pairPrompt: comparePairPrompt,
+    hasSelection: compareHasSelection,
+  } = usePendingMultiLinkPicker(
+    compareLinkMode,
+    compareLinkableBank,
+    compareLinkableCompany,
+    compareLinkPickerResetKey,
+  )
+
+  useEffect(() => {
+    if (detailLayout !== 'compare') {
+      clearCompareLinkSelection()
+      setComparePairLinkOpen(false)
+    }
+  }, [detailLayout, clearCompareLinkSelection])
+
+  const compareLinkScrollRef = useRef<{ win: number; table: number } | null>(null)
+
+  const handleCompareTogglePending = useCallback(
+    (side: 'bank' | 'company', txId: number) => {
+      const tableWrap = document.querySelector<HTMLElement>('.compare-table-wrap')
+      compareLinkScrollRef.current = {
+        win: window.scrollY,
+        table: tableWrap?.scrollTop ?? 0,
+      }
+      if (side === 'bank') compareToggleBank(txId)
+      else compareToggleCompany(txId)
+    },
+    [compareToggleBank, compareToggleCompany],
+  )
+
+  useLayoutEffect(() => {
+    const saved = compareLinkScrollRef.current
+    if (!saved) return
+    compareLinkScrollRef.current = null
+    const tableWrap = document.querySelector<HTMLElement>('.compare-table-wrap')
+    window.scrollTo(0, saved.win)
+    if (tableWrap) tableWrap.scrollTop = saved.table
+  }, [compareSelectedBankIds, compareSelectedCompanyIds])
 
   const logoutCheckpointRef = useRef<{ sessionId: number | null; canSave: boolean }>({
     sessionId: null,
@@ -3240,6 +3939,8 @@ export default function ConciliacionPage() {
       if (searchParams.get('notas') === '1') {
         if (focus.kind === 'pair') {
           setCommentTarget({ kind: 'pair', pairId: focus.pairId })
+        } else if (focus.kind === 'group') {
+          setCommentTarget({ kind: 'group', groupId: focus.groupId })
         } else if (focus.kind === 'bank') {
           setCommentTarget({ kind: 'single', side: 'bank', txId: focus.txId })
         } else {
@@ -3492,9 +4193,9 @@ export default function ConciliacionPage() {
         }),
       })
       if (!r.ok) throw new Error(await parseError(r))
-      setManualBankId('')
-      setManualCompanyId('')
       if (opts?.closeModal) setCounterpartInspect(null)
+      setComparePairLinkOpen(false)
+      clearCompareLinkSelection()
       await loadDetail(selectedId, { soft: true })
       await loadSessionListPage(sessionListPage)
       requestAnimationFrame(() => window.scrollTo({ top: y }))
@@ -3505,26 +4206,72 @@ export default function ConciliacionPage() {
     }
   }
 
-  async function handleManualPair() {
+  async function handleCreateGroup(bankIds: number[], companyIds: number[]) {
     if (selectedId == null) return
-    const b = parseTransactionId(manualBankId)
-    const c = parseTransactionId(manualCompanyId)
-    if (b == null && c == null) {
-      setManualError('Completá ambos IDs (solo números, sin letras). Ejemplo: 243 y 87.')
-      return
+    setManualLoading(true)
+    setManualError(null)
+    const y = window.scrollY
+    try {
+      await createReconciliationGroup(selectedId, bankIds, companyIds)
+      setComparePairLinkOpen(false)
+      clearCompareLinkSelection()
+      await loadDetail(selectedId, { soft: true })
+      await loadSessionListPage(sessionListPage)
+      requestAnimationFrame(() => window.scrollTo({ top: y }))
+    } catch (e) {
+      setManualError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setManualLoading(false)
     }
-    if (b == null) {
-      setManualError('ID de banco inválido o vacío. Usá la columna ID de «Pendientes banco».')
-      return
-    }
-    if (c == null) {
-      setManualError(
-        'ID de empresa inválido o vacío. Escribí solo el número (columna ID de «Pendientes empresa»).',
-      )
-      return
-    }
-    await handleManualPairIds(b, c)
   }
+
+  useEffect(() => {
+    if (detailLayout !== 'compare' || !compareLinkMode) return
+    function onKey(ev: KeyboardEvent) {
+      if (ev.key !== 'Enter' || ev.repeat) return
+      if (comparePairLinkOpen || counterpartInspect || commentTarget || attachmentTarget) return
+      if (
+        ev.target instanceof HTMLElement &&
+        ev.target.closest('input, textarea, select, [contenteditable="true"]')
+      ) {
+        return
+      }
+      if (!compareBothSides) return
+      if (compareCanGroupLink) {
+        const bankIds = compareSelectedBank.map((i) => i.m.id)
+        const companyIds = compareSelectedCompany.map((i) => i.m.id)
+        const msg =
+          `¿Conciliar grupo con ${bankIds.length} mov. banco y ${companyIds.length} mov. empresa?\n` +
+          `Σ banco ${formatAmount(compareBankSum)} · Σ empresa ${formatAmount(compareCompanySum)}`
+        ev.preventDefault()
+        if (!window.confirm(msg)) return
+        void handleCreateGroup(bankIds, companyIds)
+        return
+      }
+      if (comparePairPrompt) {
+        ev.preventDefault()
+        setComparePairLinkOpen(true)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [
+    detailLayout,
+    compareLinkMode,
+    comparePairLinkOpen,
+    counterpartInspect,
+    commentTarget,
+    attachmentTarget,
+    compareBothSides,
+    compareCanGroupLink,
+    comparePairPrompt,
+    compareSelectedBank,
+    compareSelectedCompany,
+    compareBankSum,
+    compareCompanySum,
+    sessionListPage,
+    selectedId,
+  ])
 
   async function handleUnlinkPair(pairId: number, matchSource: 'MANUAL' | 'AUTO'): Promise<boolean> {
     if (selectedId == null || classificationReadOnly) return false
@@ -3547,6 +4294,30 @@ export default function ConciliacionPage() {
     } catch (e) {
       setManualError(e instanceof Error ? e.message : String(e))
       return false
+    }
+  }
+
+  async function handleUnlinkGroup(groupId: number) {
+    if (selectedId == null || classificationReadOnly) return
+    if (
+      !window.confirm(
+        '¿Desvincular este grupo? Todos los movimientos volverán a pendientes en esta sesión.',
+      )
+    ) {
+      return
+    }
+    setManualLoading(true)
+    setManualError(null)
+    const y = window.scrollY
+    try {
+      await deleteReconciliationGroup(selectedId, groupId)
+      await loadDetail(selectedId, { soft: true })
+      await loadSessionListPage(sessionListPage)
+      requestAnimationFrame(() => window.scrollTo({ top: y }))
+    } catch (e) {
+      setManualError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setManualLoading(false)
     }
   }
 
@@ -3748,6 +4519,28 @@ export default function ConciliacionPage() {
     try {
       const r = await apiFetch(
         `/api/v1/conciliacion/sessions/${selectedId}/pairs/${pairId}/clasificacion`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            classification: classification === '' ? null : classification,
+          }),
+        },
+      )
+      if (!r.ok) throw new Error(await parseError(r))
+      await loadDetail(selectedId, { soft: true })
+      requestAnimationFrame(() => window.scrollTo({ top: y }))
+    } catch (e) {
+      setManualError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  async function handleSetGroupClassification(groupId: number, classification: string) {
+    if (selectedId == null) return
+    const y = window.scrollY
+    try {
+      const r = await apiFetch(
+        `/api/v1/conciliacion/sessions/${selectedId}/grupos/${groupId}/clasificacion`,
         {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
@@ -4641,21 +5434,6 @@ export default function ConciliacionPage() {
           )}
           {detailLoading && <p className="msg">Cargando detalle…</p>}
           {detailError && <p className="msg err">{detailError}</p>}
-          {/*
-            Formulario de saldos fuera de `!detailLoading`: un loadDetail() completo (clasificación,
-            conciliar, etc.) ponía detailLoading en true y desmontaba todo el bloque; al remontar se
-            perdía «Editar» y volvía la vista guardada. Mostramos saldos mientras haya detalle alineado
-            a la sesión elegida (puede ser datos del fetch anterior un instante al cambiar de sesión).
-          */}
-          {detailMatchesSelection && detail && (
-            <SessionBalancesForm
-              session={detail.session}
-              readOnly={sessionClosed}
-              onSaved={async () => {
-                if (selectedId != null) await loadDetail(selectedId, { soft: true })
-              }}
-            />
-          )}
           {detail && !detailLoading && (
             <>
               <ExecutiveSummaryPanel
@@ -4664,6 +5442,8 @@ export default function ConciliacionPage() {
                   closingBankBalance: detail.session.closingBankBalance,
                   closingCompanyBalance: detail.session.closingCompanyBalance,
                 }}
+                balancesStatus={balancesLoadStatus(detail.session)}
+                onOpenBalances={() => setBalancesModalOpen(true)}
               />
 
               <div className="detail-view-toggle-wrap">
@@ -4673,7 +5453,7 @@ export default function ConciliacionPage() {
                     type="button"
                     role="tab"
                     aria-selected={detailLayout === 'compare'}
-                    className="detail-view-tab"
+                    className="detail-view-tab detail-view-tab--compare"
                     onClick={() => setDetailLayout('compare')}
                   >
                     Comparativa
@@ -4682,7 +5462,7 @@ export default function ConciliacionPage() {
                     type="button"
                     role="tab"
                     aria-selected={detailLayout === 'rubro'}
-                    className="detail-view-tab"
+                    className="detail-view-tab detail-view-tab--rubro"
                     onClick={() => setDetailLayout('rubro')}
                   >
                     Por rubro
@@ -4691,7 +5471,7 @@ export default function ConciliacionPage() {
                     type="button"
                     role="tab"
                     aria-selected={detailLayout === 'ledger'}
-                    className="detail-view-tab"
+                    className="detail-view-tab detail-view-tab--ledger"
                     onClick={() => setDetailLayout('ledger')}
                   >
                     Por archivo
@@ -4700,7 +5480,7 @@ export default function ConciliacionPage() {
                     type="button"
                     role="tab"
                     aria-selected={detailLayout === 'complete'}
-                    className="detail-view-tab"
+                    className="detail-view-tab detail-view-tab--complete"
                     onClick={() => setDetailLayout('complete')}
                   >
                     Completa
@@ -4709,7 +5489,7 @@ export default function ConciliacionPage() {
                     type="button"
                     role="tab"
                     aria-selected={detailLayout === 'classic'}
-                    className="detail-view-tab"
+                    className="detail-view-tab detail-view-tab--classic"
                     onClick={() => setDetailLayout('classic')}
                   >
                     Tablas clásicas
@@ -4751,7 +5531,21 @@ export default function ConciliacionPage() {
                         effectiveSessionAmountTolerance={effectiveSessionAmountTolerance}
                       />
                     }
+                    keyboardHelp={
+                      reconcileLocked ? undefined : (
+                        <p className="keyboard-hint-popover-body">
+                          Clic en los datos de <strong>banco</strong> o <strong>empresa</strong> (ID,
+                          fecha, importe, descripción) o en el chip <strong>PB</strong>/<strong>PE</strong>{' '}
+                          para seleccionar pendientes. Otro clic quita la selección. Con ambos lados
+                          elegidos, <kbd>Enter</kbd> abre la confirmación (1:1 o grupo N:M); en el modal
+                          1:1, <kbd>Enter</kbd> vincula.
+                        </p>
+                      )
+                    }
                   />
+                  {reconcileLocked ? (
+                    <p className="ledger-view-readonly-hint">Sesión cerrada: solo consulta.</p>
+                  ) : null}
                   <ComparisonTable
                     rows={filteredComparisonRows}
                     allRowsCount={comparisonRows.length}
@@ -4762,12 +5556,22 @@ export default function ConciliacionPage() {
                     classificationReadOnly={classificationReadOnly}
                     sessionAmountTolerance={effectiveSessionAmountTolerance}
                     classificationSuggestions={classificationSuggestions}
+                    linkMode={compareLinkMode}
+                    selectedBankIds={compareLinkMode ? compareSelectedBankIds : undefined}
+                    selectedCompanyIds={compareLinkMode ? compareSelectedCompanyIds : undefined}
+                    onTogglePending={compareLinkMode ? handleCompareTogglePending : undefined}
                     onUnlinkPair={(pairId, matchSource) => void handleUnlinkPair(pairId, matchSource)}
+                    onUnlinkGroup={
+                      classificationReadOnly ? undefined : (groupId) => void handleUnlinkGroup(groupId)
+                    }
                     onSetClassification={(side, txId, c) =>
                       void handleSetClassification(side, txId, c)
                     }
                     onSetPairClassification={(pairId, c) =>
                       void handleSetPairClassification(pairId, c)
+                    }
+                    onSetGroupClassification={(groupId, c) =>
+                      void handleSetGroupClassification(groupId, c)
                     }
                     onOpenPendingComments={(t) => setCommentTarget(t)}
                     onOpenPendingAttachments={(t) => setAttachmentTarget(t)}
@@ -4776,6 +5580,32 @@ export default function ConciliacionPage() {
                       classificationReadOnly ? undefined : (side, txId) => void handleDeferMovement(side, txId)
                     }
                   />
+                  {compareLinkMode && compareHasSelection ? (
+                    <PendingLinkSelectionPanel
+                      selectedBank={compareSelectedBank}
+                      selectedCompany={compareSelectedCompany}
+                      bankSum={compareBankSum}
+                      companySum={compareCompanySum}
+                      delta={compareDelta}
+                      hasBank={compareHasBank}
+                      hasCompany={compareHasCompany}
+                      bothSides={compareBothSides}
+                      canGroupLink={compareCanGroupLink}
+                      manualLinkLoading={manualLoading}
+                      sessionAmountTolerance={effectiveSessionAmountTolerance}
+                      enterHint
+                      showSelectionTables
+                      onClear={clearCompareLinkSelection}
+                      onCreateGroup={
+                        reconcileLocked
+                          ? undefined
+                          : (bankIds, companyIds) => handleCreateGroup(bankIds, companyIds)
+                      }
+                      onConfirmPairLink={
+                        reconcileLocked ? undefined : () => setComparePairLinkOpen(true)
+                      }
+                    />
+                  ) : null}
                 </>
               ) : detailLayout === 'rubro' ? (
                 <>
@@ -4801,6 +5631,9 @@ export default function ConciliacionPage() {
                         ? undefined
                         : (bankId, companyId) => void handleManualPairIds(bankId, companyId)
                     }
+                    onCreateGroup={
+                      reconcileLocked ? undefined : (bankIds, companyIds) => handleCreateGroup(bankIds, companyIds)
+                    }
                     onScrollToComparisonRow={(rowKey) => {
                       setDetailLayout('compare')
                       requestAnimationFrame(() => scrollToComparisonRow(rowKey))
@@ -4809,6 +5642,11 @@ export default function ConciliacionPage() {
                       reconcileLocked || classificationReadOnly
                         ? undefined
                         : (pairId, matchSource) => handleUnlinkPair(pairId, matchSource)
+                    }
+                    onUnlinkGroup={
+                      reconcileLocked || classificationReadOnly
+                        ? undefined
+                        : (groupId) => void handleUnlinkGroup(groupId)
                     }
                   />
                 </>
@@ -4823,6 +5661,7 @@ export default function ConciliacionPage() {
                   </SubsectionTitleRow>
                   <FullLedgerView
                     detail={detail}
+                    sessionAmountTolerance={effectiveSessionAmountTolerance}
                     reconcileLocked={reconcileLocked}
                     manualLinkLoading={manualLoading}
                     manualLinkError={manualError}
@@ -4831,10 +5670,22 @@ export default function ConciliacionPage() {
                         ? undefined
                         : (bankId, companyId) => void handleManualPairIds(bankId, companyId)
                     }
+                    onCreateGroup={
+                      reconcileLocked ? undefined : (bankIds, companyIds) => handleCreateGroup(bankIds, companyIds)
+                    }
+                    onScrollToComparisonRow={(rowKey) => {
+                      setDetailLayout('compare')
+                      requestAnimationFrame(() => scrollToComparisonRow(rowKey))
+                    }}
                     onUnlinkPair={
                       reconcileLocked || classificationReadOnly
                         ? undefined
                         : (pairId, matchSource) => handleUnlinkPair(pairId, matchSource)
+                    }
+                    onUnlinkGroup={
+                      reconcileLocked || classificationReadOnly
+                        ? undefined
+                        : (groupId) => void handleUnlinkGroup(groupId)
                     }
                   />
                 </>
@@ -4876,11 +5727,17 @@ export default function ConciliacionPage() {
                     sessionAmountTolerance={effectiveSessionAmountTolerance}
                     classificationSuggestions={classificationSuggestions}
                     onUnlinkPair={(pairId, matchSource) => void handleUnlinkPair(pairId, matchSource)}
+                    onUnlinkGroup={
+                      classificationReadOnly ? undefined : (groupId) => void handleUnlinkGroup(groupId)
+                    }
                     onSetClassification={(side, txId, c) =>
                       void handleSetClassification(side, txId, c)
                     }
                     onSetPairClassification={(pairId, c) =>
                       void handleSetPairClassification(pairId, c)
+                    }
+                    onSetGroupClassification={(groupId, c) =>
+                      void handleSetGroupClassification(groupId, c)
                     }
                     onOpenPendingComments={(t) => setCommentTarget(t)}
                     onOpenPendingAttachments={(t) => setAttachmentTarget(t)}
@@ -5044,68 +5901,6 @@ export default function ConciliacionPage() {
                   />
                 </>
               )}
-
-              <SubsectionTitleRow
-                help={<ManualLinkHelpText />}
-                helpAriaLabel="Ayuda sobre vínculo manual"
-                helpDialogLabel="Ayuda de vínculo manual"
-              >
-                Vínculo manual
-              </SubsectionTitleRow>
-              <div
-                className="manual-pair-toolbar"
-                role="group"
-                aria-label="Vínculo manual por ID"
-              >
-                <label className="compare-date-field">
-                  <span>ID mov. banco</span>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    autoComplete="off"
-                    disabled={reconcileLocked}
-                    value={manualBankId}
-                    onChange={(ev) => {
-                      setManualBankId(ev.target.value)
-                      setManualError(null)
-                    }}
-                    placeholder="Pendiente banco"
-                    aria-label="ID movimiento banco"
-                  />
-                </label>
-                <label className="compare-date-field">
-                  <span>ID mov. empresa</span>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    autoComplete="off"
-                    disabled={reconcileLocked}
-                    value={manualCompanyId}
-                    onChange={(ev) => {
-                      setManualCompanyId(ev.target.value)
-                      setManualError(null)
-                    }}
-                    placeholder="Pendiente empresa"
-                    aria-label="ID movimiento empresa"
-                  />
-                </label>
-                <button
-                  type="button"
-                  className="btn-import manual-pair-submit"
-                  disabled={manualLoading || reconcileLocked}
-                  onClick={() => void handleManualPair()}
-                >
-                  {manualLoading ? 'Guardando…' : 'Vincular'}
-                </button>
-              </div>
-              {detail ? (
-                <ManualLinkPreview
-                  detail={detail}
-                  bankIdRaw={manualBankId}
-                  companyIdRaw={manualCompanyId}
-                />
-              ) : null}
-              {manualError && <p className="msg err">{manualError}</p>}
             </>
           )}
         </section>
@@ -5117,6 +5912,16 @@ export default function ConciliacionPage() {
           loading={activityLoading}
           error={activityError}
           onClose={closeActivityModal}
+        />
+      )}
+      {balancesModalOpen && detailMatchesSelection && detail && (
+        <SessionBalancesModal
+          session={detail.session}
+          readOnly={sessionClosed}
+          onSaved={async () => {
+            if (selectedId != null) await loadDetail(selectedId, { soft: true })
+          }}
+          onClose={() => setBalancesModalOpen(false)}
         />
       )}
       {selectedId != null && (
@@ -5157,6 +5962,17 @@ export default function ConciliacionPage() {
               ? undefined
               : (bankId, companyId) =>
                   void handleManualPairIds(bankId, companyId, { closeModal: true })
+          }
+        />
+      ) : null}
+      {comparePairLinkOpen && comparePairPrompt ? (
+        <RubroLinkConfirmModal
+          prompt={comparePairPrompt}
+          loading={manualLoading}
+          error={manualError}
+          onCancel={() => setComparePairLinkOpen(false)}
+          onConfirm={() =>
+            void handleManualPairIds(comparePairPrompt.bankId, comparePairPrompt.companyId)
           }
         />
       ) : null}

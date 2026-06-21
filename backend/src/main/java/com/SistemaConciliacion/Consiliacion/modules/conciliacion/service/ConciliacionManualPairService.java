@@ -33,13 +33,16 @@ public class ConciliacionManualPairService {
 	private final ReconciliationPairCommentRepository reconciliationPairCommentRepository;
 	private final PairAttachmentService pairAttachmentService;
 	private final SessionAuditService sessionAuditService;
+	private final MovementMatchService movementMatchService;
+	private final ConciliacionGroupService conciliacionGroupService;
 
 	public ConciliacionManualPairService(ReconciliationSessionRepository sessionRepository,
 			BankTransactionRepository bankTransactionRepository,
 			CompanyTransactionRepository companyTransactionRepository,
 			ReconciliationPairRepository reconciliationPairRepository,
 			ReconciliationPairCommentRepository reconciliationPairCommentRepository,
-			PairAttachmentService pairAttachmentService, SessionAuditService sessionAuditService) {
+			PairAttachmentService pairAttachmentService, SessionAuditService sessionAuditService,
+			MovementMatchService movementMatchService, ConciliacionGroupService conciliacionGroupService) {
 		this.sessionRepository = sessionRepository;
 		this.bankTransactionRepository = bankTransactionRepository;
 		this.companyTransactionRepository = companyTransactionRepository;
@@ -47,6 +50,8 @@ public class ConciliacionManualPairService {
 		this.reconciliationPairCommentRepository = reconciliationPairCommentRepository;
 		this.pairAttachmentService = pairAttachmentService;
 		this.sessionAuditService = sessionAuditService;
+		this.movementMatchService = movementMatchService;
+		this.conciliacionGroupService = conciliacionGroupService;
 	}
 
 	@Transactional
@@ -62,12 +67,8 @@ public class ConciliacionManualPairService {
 		CompanyTransaction company = companyTransactionRepository.findByIdAndSession_Id(companyTransactionId, sessionId)
 				.orElseThrow(() -> new IllegalArgumentException("Movimiento de empresa no pertenece a esta sesión."));
 
-		if (reconciliationPairRepository.existsByBankTransaction_Id(bank.getId())) {
-			throw new IllegalArgumentException("Ese movimiento de banco ya está vinculado.");
-		}
-		if (reconciliationPairRepository.existsByCompanyTransaction_Id(company.getId())) {
-			throw new IllegalArgumentException("Ese movimiento de empresa ya está vinculado.");
-		}
+		movementMatchService.assertBankUnmatched(bank.getId());
+		movementMatchService.assertCompanyUnmatched(company.getId());
 
 		ReconciliationPair p = new ReconciliationPair();
 		p.setSession(session);
@@ -119,5 +120,16 @@ public class ConciliacionManualPairService {
 		reconciliationPairCommentRepository.deleteByPair_Id(p.getId());
 		reconciliationPairRepository.delete(p);
 		return true;
+	}
+
+	/**
+	 * Quita par o grupo que contiene el movimiento. Sin auditoría (p. ej. reimportación en lote).
+	 */
+	@Transactional
+	public boolean unlinkAnyForMovementSilent(long sessionId, PendingMovementSide side, long txId) {
+		if (unlinkPairForMovementSilent(sessionId, side, txId)) {
+			return true;
+		}
+		return conciliacionGroupService.unlinkGroupForMovementSilent(sessionId, side, txId);
 	}
 }
