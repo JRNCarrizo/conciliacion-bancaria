@@ -1,7 +1,7 @@
-import { Fragment, forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type CSSProperties, type RefObject } from 'react'
+import { Fragment, forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type CSSProperties } from 'react'
 import type { SessionDetail } from './types'
 import { ClassificationComboControlled } from './ClassificationCombo'
-import { isEnterKey, isTypingTarget } from './keyboardScrollUtils'
+import { isEnterKey, isTypingTarget, scrollRubroExpandedDetailIntoView } from './keyboardScrollUtils'
 import { MovementMiniTable } from './MovementMiniTable'
 import { useLedgerKeyboardNav } from './useLedgerKeyboardNav'
 import {
@@ -9,6 +9,7 @@ import {
   buildRubroGroups,
   bulkClassificationTargetCount,
   collectBulkClassificationTargets,
+  collectSelectionClassificationTargets,
   isRubroMovementLinkable,
   crossCompareTableItems,
   mergedBankItems,
@@ -21,14 +22,45 @@ import {
   type RubroGroupRow,
   type RubroMovementRef,
 } from './utils/rubroGroups'
+import type { RubroViewTab } from './utils/reconciledGroups'
 import { PairPreviewModal } from './PairPreviewModal'
 import { HelpPopoverButton } from './HelpPopoverButton'
 import { PendingLinkSelectionPanel } from './PendingLinkSelectionPanel'
+import { ReconciledGroupsTab } from './ReconciledGroupsTab'
 import { RubroLinkConfirmModal } from './RubroLinkConfirmModal'
 import { usePendingMultiLinkPicker } from './usePendingMultiLinkPicker'
 import { useRubroListKeyboardNav } from './useRubroListKeyboardNav'
 import { resolvePairPreview } from './utils/pairLookup'
 import { formatAmount } from './utils/format'
+
+function RubroViewHelpText() {
+  return (
+    <>
+      <p>
+        <strong>Detalle/referencia</strong> agrupa automáticamente cuando la descripción (o la
+        referencia si no hay descripción) es la misma en extracto y libro.{' '}
+        <strong>Clasificado manual</strong> agrupa por el rubro asignado a cada movimiento.
+      </p>
+      <p>
+        Si los textos no coinciden, usá la columna <strong>Comparar</strong>: cada clic en{' '}
+        <strong>Banco</strong> o <strong>Empresa</strong> agrega o quita ese grupo del panel de
+        comparación cruzada (podés elegir varios de cada lado). Ahí ves Σ y Δ, podés{' '}
+        <strong>clasificar</strong> todos los movimientos seleccionados con un solo rubro,
+        <strong> vincular</strong> pendientes 1:1 (clic en la fila de cada lado) o{' '}
+        <strong>conciliar grupo</strong> cuando hay varios de un lado y uno o más del otro (N:M).
+      </p>
+      <p>
+        Δ en la tabla = mismo grupo (misma fila). Cuadrado si |Δ| ≤ tolerancia de importe. En
+        movimientos ya emparejados, tocá <strong>par</strong> para ver el otro lado.
+      </p>
+      <p>
+        <strong>Conciliados (N:M)</strong> lista los grupos ya vinculados (varios banco ↔ varios
+        empresa). Por defecto muestra los <strong>sin clasificar</strong>; asigná rubro en la columna
+        Clasificación o abrí la fila para ver los movimientos.
+      </p>
+    </>
+  )
+}
 
 /** Anchos de columnas: detalle flexible (%), estado y comparar fijos (rem). */
 const RUBRO_SUMMARY_COLS = [
@@ -42,6 +74,30 @@ const RUBRO_SUMMARY_COLS = [
   '5.25rem',
   '5.85rem',
 ] as const
+
+function RubroExpandChevron({ open }: { open: boolean }) {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden focusable="false">
+      {open ? (
+        <path
+          d="M6 9l6 6 6-6"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      ) : (
+        <path
+          d="M9 6l6 6-6 6"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      )}
+    </svg>
+  )
+}
 
 export type CrossGroupCompareHandle = {
   handleEnterKey: () => void
@@ -71,6 +127,11 @@ const CrossGroupComparePanel = forwardRef<
     onScrollToGroup?: (groupId: number) => void
     onUnlinkGroup?: (groupId: number) => void
     onBulkClassify: (classification: string) => Promise<void>
+    onBulkClassifySelection: (
+      selectedBank: readonly RubroMovementRef[],
+      selectedCompany: readonly RubroMovementRef[],
+      classification: string,
+    ) => Promise<void>
     onRemoveBankKey: (groupKey: string) => void
     onRemoveCompanyKey: (groupKey: string) => void
   }
@@ -95,6 +156,7 @@ const CrossGroupComparePanel = forwardRef<
     onScrollToGroup,
     onUnlinkGroup,
     onBulkClassify,
+    onBulkClassifySelection,
     onRemoveBankKey,
     onRemoveCompanyKey,
   },
@@ -102,7 +164,6 @@ const CrossGroupComparePanel = forwardRef<
 ) {
   const sectionRef = useRef<HTMLElement>(null)
   const tablesRef = useRef<HTMLDivElement>(null)
-  const selectionPreviewRef = useRef<HTMLDivElement>(null)
   const [pairLinkOpen, setPairLinkOpen] = useState(false)
   const hasBank = bankGroups.length > 0
   const hasCompany = companyGroups.length > 0
@@ -201,13 +262,6 @@ const CrossGroupComparePanel = forwardRef<
   useEffect(() => {
     setPairLinkOpen(false)
   }, [linkPickerResetKey])
-
-  useEffect(() => {
-    if (!hasLinkSelection) return
-    requestAnimationFrame(() => {
-      selectionPreviewRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
-    })
-  }, [hasLinkSelection, selectedBankIds, selectedCompanyIds])
 
   useEffect(() => {
     if (!linkMode) return
@@ -410,7 +464,7 @@ const CrossGroupComparePanel = forwardRef<
               <kbd>↑</kbd> <kbd>↓</kbd> filas · <kbd>←</kbd> <kbd>→</kbd> lado ·{' '}
               {linkMode ? (
                 <>
-                  <kbd>Espacio</kbd> pend. · <kbd>Enter</kbd> vincular ·
+                  <kbd>Espacio</kbd> fila · <kbd>Enter</kbd> vincular ·
                 </>
               ) : null}{' '}
               <kbd>Esc</kbd> limpia selección
@@ -459,55 +513,35 @@ const CrossGroupComparePanel = forwardRef<
             ) : null}
           </div>
 
-          {(canBulkGroupLink || (!classificationReadOnly && classifyCount > 0)) && (
-            <div className="rubro-cross-actions">
-              {canBulkGroupLink ? (
-                <div className="rubro-cross-action rubro-cross-action--link">
-                  <button
-                    type="button"
-                    className="btn-import rubro-cross-group-link-btn"
-                    disabled={linkLoading}
-                    onClick={runBulkGroupLinkConfirm}
-                  >
-                    {linkLoading
-                      ? 'Guardando…'
-                      : `Conciliar todo N:M (${linkableBank.length}·${linkableCompany.length})`}
-                  </button>
-                  {linkError ? <p className="msg err rubro-cross-group-link-err">{linkError}</p> : null}
+          {!classificationReadOnly && classifyCount > 0 ? (
+            <div className="rubro-cross-action rubro-cross-action--classify ledger-selection-classify">
+              <label className="rubro-cross-classify-caption" htmlFor="rubro-cross-classify-input">
+                Clasificación
+              </label>
+              <div className="rubro-cross-classify-row">
+                <div className="clasif-field-wrap rubro-cross-classify-field">
+                  <ClassificationComboControlled
+                    text={classifyDraft}
+                    onTextChange={setClassifyDraft}
+                    suggestions={classificationSuggestions}
+                    disabled={classifyLoading}
+                    placeholder="Ej.: Comisiones"
+                    ariaLabel="Clasificación para la selección"
+                    inputId="rubro-cross-classify-input"
+                  />
                 </div>
-              ) : null}
-
-              {!classificationReadOnly && classifyCount > 0 ? (
-                <div className="rubro-cross-action rubro-cross-action--classify">
-                  <label className="rubro-cross-classify-caption" htmlFor="rubro-cross-classify-input">
-                    Clasificación
-                  </label>
-                  <div className="rubro-cross-classify-row">
-                    <div className="clasif-field-wrap rubro-cross-classify-field">
-                      <ClassificationComboControlled
-                        text={classifyDraft}
-                        onTextChange={setClassifyDraft}
-                        suggestions={classificationSuggestions}
-                        disabled={classifyLoading}
-                        placeholder="Ej.: Comisiones"
-                        ariaLabel="Clasificación para la selección"
-                        inputId="rubro-cross-classify-input"
-                      />
-                    </div>
-                    <button
-                      type="button"
-                      className="btn-secondary rubro-cross-classify-btn"
-                      disabled={classifyLoading}
-                      onClick={() => void applyBulkClassification()}
-                    >
-                      {classifyLoading ? '…' : `Aplicar (${classifyCount})`}
-                    </button>
-                  </div>
-                  {classifyError ? <p className="msg err rubro-cross-classify-err">{classifyError}</p> : null}
-                </div>
-              ) : null}
+                <button
+                  type="button"
+                  className="btn-secondary rubro-cross-classify-btn"
+                  disabled={classifyLoading}
+                  onClick={() => void applyBulkClassification()}
+                >
+                  {classifyLoading ? '…' : `Aplicar (${classifyCount})`}
+                </button>
+              </div>
+              {classifyError ? <p className="msg err rubro-cross-classify-err">{classifyError}</p> : null}
             </div>
-          )}
+          ) : null}
         </div>
       ) : null}
 
@@ -527,7 +561,7 @@ const CrossGroupComparePanel = forwardRef<
           onScrollToGroup={onScrollToGroup}
           onUnlinkGroup={onUnlinkGroup}
           tableWrapRef={bankWrapRef}
-          visibleRows={10}
+          visibleRows={12}
           adaptiveHeight
           hideLinkHint
           keyboardNav={{
@@ -547,7 +581,7 @@ const CrossGroupComparePanel = forwardRef<
           onScrollToGroup={onScrollToGroup}
           onUnlinkGroup={onUnlinkGroup}
           tableWrapRef={companyWrapRef}
-          visibleRows={10}
+          visibleRows={12}
           adaptiveHeight
           hideLinkHint
           keyboardNav={{
@@ -557,10 +591,31 @@ const CrossGroupComparePanel = forwardRef<
           onTableMouseEnter={() => handleTableMouseEnter('company')}
         />
       </div>
+
+      {!(linkMode && hasLinkSelection) && canBulkGroupLink ? (
+        <footer className="ledger-selection-actions rubro-cross-actions-footer">
+          <div className="rubro-cross-group-link-bar">
+            <p className="rubro-cross-group-link-lead">
+              Podés conciliar todos los pendientes de los grupos elegidos como un solo grupo (N:M).
+            </p>
+            <button
+              type="button"
+              className="btn-import rubro-cross-group-link-btn"
+              disabled={linkLoading}
+              onClick={runBulkGroupLinkConfirm}
+            >
+              {linkLoading
+                ? 'Guardando…'
+                : `Conciliar todo N:M (${linkableBank.length}·${linkableCompany.length})`}
+            </button>
+            {linkError ? <p className="msg err rubro-cross-group-link-err">{linkError}</p> : null}
+          </div>
+        </footer>
+      ) : null}
     </section>
 
       {linkMode && hasLinkSelection ? (
-        <div ref={selectionPreviewRef} className="ledger-selection-preview-anchor">
+        <div className="ledger-selection-preview-anchor">
           <PendingLinkSelectionPanel
             selectedBank={selectedBank}
             selectedCompany={selectedCompany}
@@ -573,6 +628,13 @@ const CrossGroupComparePanel = forwardRef<
             canGroupLink={canGroupLink}
             manualLinkLoading={linkLoading}
             sessionAmountTolerance={sessionAmountTolerance}
+            classificationReadOnly={classificationReadOnly}
+            classificationSuggestions={classificationSuggestions}
+            classifyLoading={classifyLoading}
+            classifyError={classifyError}
+            onBulkClassify={(classification) =>
+              onBulkClassifySelection(selectedBank, selectedCompany, classification)
+            }
             enterHint
             onViewPair={onViewPair}
             onClear={clearLinkSelection}
@@ -600,9 +662,6 @@ const CrossGroupComparePanel = forwardRef<
 
 function RubroExpandedBottomPanel({
   group,
-  sessionAmountTolerance,
-  manualLinkLoading,
-  onCreateGroup,
   onViewPair,
   onScrollToGroup,
   onUnlinkGroup,
@@ -612,28 +671,11 @@ function RubroExpandedBottomPanel({
   linkMode,
   selectedBankIds,
   selectedCompanyIds,
-  selectedBank,
-  selectedCompany,
   toggleBank,
   toggleCompany,
   detailPairLinkOpen,
-  bankSum,
-  companySum,
-  delta,
-  hasBank,
-  hasCompany,
-  bothSides,
-  canGroupLink,
-  hasSelection,
-  onClearSelection,
-  onConfirmPairLink,
-  panelRef,
 }: {
   group: RubroGroupRow
-  sessionAmountTolerance?: number | null
-  manualLinkLoading: boolean
-  onCreateGroup?: (bankIds: number[], companyIds: number[]) => void | Promise<void>
-  onConfirmPairLink?: () => void
   onViewPair?: (pairId: number) => void
   onScrollToGroup?: (groupId: number) => void
   onUnlinkGroup?: (groupId: number) => void
@@ -643,21 +685,9 @@ function RubroExpandedBottomPanel({
   linkMode: boolean
   selectedBankIds?: Set<number>
   selectedCompanyIds?: Set<number>
-  selectedBank: readonly RubroMovementRef[]
-  selectedCompany: readonly RubroMovementRef[]
   toggleBank?: (id: number) => void
   toggleCompany?: (id: number) => void
   detailPairLinkOpen: boolean
-  bankSum: number
-  companySum: number
-  delta: number
-  hasBank: boolean
-  hasCompany: boolean
-  bothSides: boolean
-  canGroupLink: boolean
-  hasSelection: boolean
-  onClearSelection: () => void
-  panelRef?: RefObject<HTMLDivElement | null>
 }) {
   const linkPickerResetKey = useMemo(
     () =>
@@ -691,54 +721,49 @@ function RubroExpandedBottomPanel({
   })
 
   return (
-    <div ref={panelRef} className="rubro-expanded-bottom-wrap">
-      <section
-        className="rubro-expanded-bottom-panel rubro-cross-compare"
-        aria-label={`Detalle del grupo ${group.rubro}`}
-      >
-      <header className="rubro-cross-compare-head">
-        <div className="rubro-cross-head-main">
-          <h4>{group.rubro}</h4>
-          <p className="rubro-cross-head-hint">
-            {group.bankCount} mov. banco · {group.companyCount} mov. empresa · Δ{' '}
-            {formatAmount(group.delta)}
-          </p>
+    <section
+      className="rubro-group-detail-below"
+      aria-label={`Detalle del grupo ${group.rubro}`}
+    >
+      <header className="rubro-group-detail-head">
+        <div className="rubro-group-detail-title-block">
+          <span className="rubro-group-detail-eyebrow">Movimientos del grupo</span>
+          <h4 className="scroll-x-muted" title={group.rubro}>
+            {group.rubro}
+          </h4>
         </div>
-        {group.bankItems.length > 0 || group.companyItems.length > 0 ? (
-          <HelpPopoverButton
-            variant="keyboard"
-            ariaLabel="Atajos de teclado en detalle del rubro"
-            dialogLabel="Atajos — detalle del rubro"
-          >
-            {linkMode ? (
-              <p className="keyboard-hint-popover-body">
-                <kbd>↑</kbd> <kbd>↓</kbd> recorren filas · <kbd>←</kbd> <kbd>→</kbd> cambian de tabla ·{' '}
-                <kbd>↑</kbd> en la primera fila vuelve al rubro · <kbd>Espacio</kbd> selecciona
-                pendientes · <kbd>Enter</kbd> confirma vínculo o grupo · <kbd>Esc</kbd> limpia selección.
-              </p>
-            ) : (
-              <p className="keyboard-hint-popover-body">
-                <kbd>↑</kbd> <kbd>↓</kbd> recorren filas · <kbd>←</kbd> <kbd>→</kbd> pasan al otro lado ·{' '}
-                <kbd>↑</kbd> en la primera fila vuelve al rubro.
-              </p>
-            )}
-          </HelpPopoverButton>
-        ) : null}
+        <div className="rubro-group-detail-metrics" aria-label="Resumen del grupo">
+          <span className="rubro-metric-chip rubro-metric-chip--bank">
+            <span className="rubro-metric-chip-label">Banco</span>
+            <strong>{group.bankCount}</strong>
+            <span className="rubro-metric-chip-sum">{formatAmount(group.bankSum)}</span>
+          </span>
+          <span className="rubro-metric-chip rubro-metric-chip--company">
+            <span className="rubro-metric-chip-label">Empresa</span>
+            <strong>{group.companyCount}</strong>
+            <span className="rubro-metric-chip-sum">{formatAmount(group.companySum)}</span>
+          </span>
+          <span className="rubro-metric-chip rubro-metric-chip--delta">
+            <span className="rubro-metric-chip-label">Δ</span>
+            <strong>{formatAmount(group.delta)}</strong>
+          </span>
+        </div>
       </header>
 
-      <div className="rubro-cross-tables rubro-detail-grid" onMouseLeave={handleGridMouseLeave}>
+      <div className="rubro-cross-tables rubro-detail-grid rubro-detail-grid--panels" onMouseLeave={handleGridMouseLeave}>
         <MovementMiniTable
           side="bank"
-          title={`Banco (${group.bankCount})`}
+          title={`Banco`}
           items={group.bankItems}
           linkMode={linkMode}
+          panelLayout
           selectedTxIds={linkMode ? selectedBankIds : undefined}
           onToggleTxId={linkMode ? toggleBank : undefined}
           onViewPair={onViewPair}
           onScrollToGroup={onScrollToGroup}
           onUnlinkGroup={onUnlinkGroup}
           tableWrapRef={bankWrapRef}
-          visibleRows={10}
+          visibleRows={12}
           adaptiveHeight
           hideLinkHint
           keyboardNav={{
@@ -749,16 +774,17 @@ function RubroExpandedBottomPanel({
         />
         <MovementMiniTable
           side="company"
-          title={`Empresa (${group.companyCount})`}
+          title={`Empresa`}
           items={group.companyItems}
           linkMode={linkMode}
+          panelLayout
           selectedTxIds={linkMode ? selectedCompanyIds : undefined}
           onToggleTxId={linkMode ? toggleCompany : undefined}
           onViewPair={onViewPair}
           onScrollToGroup={onScrollToGroup}
           onUnlinkGroup={onUnlinkGroup}
           tableWrapRef={companyWrapRef}
-          visibleRows={10}
+          visibleRows={12}
           adaptiveHeight
           hideLinkHint
           keyboardNav={{
@@ -768,29 +794,7 @@ function RubroExpandedBottomPanel({
           onTableMouseEnter={() => handleTableMouseEnter('company')}
         />
       </div>
-      </section>
-
-      {linkMode && hasSelection ? (
-        <PendingLinkSelectionPanel
-          selectedBank={selectedBank}
-          selectedCompany={selectedCompany}
-          bankSum={bankSum}
-          companySum={companySum}
-          delta={delta}
-          hasBank={hasBank}
-          hasCompany={hasCompany}
-          bothSides={bothSides}
-          canGroupLink={canGroupLink}
-          manualLinkLoading={manualLinkLoading}
-          sessionAmountTolerance={sessionAmountTolerance}
-          enterHint
-          onViewPair={onViewPair}
-          onClear={onClearSelection}
-          onCreateGroup={onCreateGroup}
-          onConfirmPairLink={onConfirmPairLink}
-        />
-      ) : null}
-    </div>
+    </section>
   )
 }
 
@@ -804,6 +808,7 @@ export function RubroGroupsView({
   classificationSuggestions,
   onSetClassification,
   onSetPairClassification,
+  onSetGroupClassification,
   onManualPair,
   onCreateGroup,
   onScrollToComparisonRow,
@@ -819,6 +824,7 @@ export function RubroGroupsView({
   classificationSuggestions: readonly string[]
   onSetClassification: (side: 'bank' | 'company', txId: number, classification: string) => void | Promise<void>
   onSetPairClassification: (pairId: number, classification: string) => void | Promise<void>
+  onSetGroupClassification: (groupId: number, classification: string) => void | Promise<void>
   onManualPair?: (bankId: number, companyId: number) => void
   onCreateGroup?: (bankIds: number[], companyIds: number[]) => void | Promise<void>
   onScrollToComparisonRow?: (rowKey: string) => void
@@ -828,7 +834,7 @@ export function RubroGroupsView({
   ) => void | boolean | Promise<void | boolean>
   onUnlinkGroup?: (groupId: number) => void | Promise<void>
 }) {
-  const [groupMode, setGroupMode] = useState<RubroGroupMode>('classification')
+  const [viewTab, setViewTab] = useState<RubroViewTab>('classification')
   const [viewPairId, setViewPairId] = useState<number | null>(null)
   const [expandedKey, setExpandedKey] = useState<string | null>(null)
   const [expandedDetailPairLinkOpen, setExpandedDetailPairLinkOpen] = useState(false)
@@ -839,7 +845,6 @@ export function RubroGroupsView({
   const [classifyLoading, setClassifyLoading] = useState(false)
   const [classifyError, setClassifyError] = useState<string | null>(null)
   const crossCompareRef = useRef<CrossGroupCompareHandle>(null)
-  const expandedBottomRef = useRef<HTMLDivElement>(null)
 
   const handleScrollToGroup = useCallback(
     (groupId: number) => {
@@ -848,9 +853,15 @@ export function RubroGroupsView({
     [onScrollToComparisonRow],
   )
 
+  const rubroGroupMode: RubroGroupMode =
+    viewTab === 'reconciled' ? 'classification' : viewTab
+
   const groups = useMemo(
-    () => buildRubroGroups(detail, sessionAmountTolerance, groupMode),
-    [detail, sessionAmountTolerance, groupMode],
+    () =>
+      viewTab === 'reconciled'
+        ? []
+        : buildRubroGroups(detail, sessionAmountTolerance, rubroGroupMode),
+    [detail, sessionAmountTolerance, viewTab, rubroGroupMode],
   )
 
   const groupsByKey = useMemo(() => new Map(groups.map((g) => [g.groupKey, g])), [groups])
@@ -959,18 +970,11 @@ export function RubroGroupsView({
   const hasComparePicks = pickBankKeys.size > 0 || pickCompanyKeys.size > 0
 
   useEffect(() => {
-    if (pickBankKeys.size === 0 && pickCompanyKeys.size === 0) return
-    requestAnimationFrame(() => {
-      crossCompareRef.current?.scrollTablesIntoView()
-    })
-  }, [pickBankKeys, pickCompanyKeys, crossPreviewGroups.length])
-
-  useEffect(() => {
     setExpandedKey(null)
     setPickBankKeys(new Set())
     setPickCompanyKeys(new Set())
     setClassifyError(null)
-  }, [groupMode])
+  }, [viewTab])
 
   useEffect(() => {
     setPickBankKeys((prev) => {
@@ -986,8 +990,9 @@ export function RubroGroupsView({
     })
   }, [groupsByKey])
 
-  const emptyLabel = groupMode === 'classification' ? SIN_RUBRO_LABEL : SIN_DETALLE_LABEL
-  const groupColumnTitle = groupMode === 'classification' ? 'Rubro (clasif.)' : 'Detalle / referencia'
+  const emptyLabel = rubroGroupMode === 'classification' ? SIN_RUBRO_LABEL : SIN_DETALLE_LABEL
+  const groupColumnTitle =
+    rubroGroupMode === 'classification' ? 'Rubro (clasif.)' : 'Detalle / referencia'
 
   const filtered = useMemo(() => {
     return groups.filter((g) => {
@@ -997,10 +1002,10 @@ export function RubroGroupsView({
     })
   }, [groups, hideEmpty, onlyMismatch])
 
-  /** Altura de la lista: crece con las filas visibles (máx. 10), sin hueco vacío si hay pocas. */
+  /** Altura de la lista: crece con las filas visibles (máx. 12), sin hueco vacío si hay pocas. */
   const listVisibleRows = useMemo(() => {
     const n = filtered.length === 0 ? 1 : filtered.length
-    return Math.min(10, n)
+    return Math.min(12, n)
   }, [filtered.length])
 
   const rubroListWrapStyle = useMemo(
@@ -1017,8 +1022,8 @@ export function RubroGroupsView({
 
   const rubroListResetKey = useMemo(
     () =>
-      [detail.session.id, groupMode, hideEmpty ? '1' : '0', onlyMismatch ? '1' : '0'].join('|'),
-    [detail.session.id, groupMode, hideEmpty, onlyMismatch],
+      [detail.session.id, viewTab, hideEmpty ? '1' : '0', onlyMismatch ? '1' : '0'].join('|'),
+    [detail.session.id, viewTab, hideEmpty, onlyMismatch],
   )
 
   const [innerNavGroupKey, setInnerNavGroupKey] = useState<string | null>(null)
@@ -1089,6 +1094,20 @@ export function RubroGroupsView({
     })
   }, [])
 
+  const toggleGroupExpand = useCallback((groupKey: string, isOpen: boolean) => {
+    if (!isOpen) {
+      setPickBankKeys(new Set())
+      setPickCompanyKeys(new Set())
+    }
+    setExpandedKey(isOpen ? null : groupKey)
+  }, [])
+
+  function handleRubroRowClick(ev: React.MouseEvent, groupKey: string, isOpen: boolean) {
+    const target = ev.target as HTMLElement
+    if (target.closest('.rubro-pick-btn, .rubro-expand-btn')) return
+    toggleGroupExpand(groupKey, isOpen)
+  }
+
   useEffect(() => {
     setInnerNavGroupKey(null)
   }, [expandedKey])
@@ -1113,22 +1132,22 @@ export function RubroGroupsView({
   })
 
   useEffect(() => {
-    if (!expandedHasLinkSelection) return
-    requestAnimationFrame(() => {
-      expandedBottomRef.current
-        ?.querySelector('.ledger-selection-panel')
-        ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
-    })
-  }, [expandedHasLinkSelection, expandedSelectedBankIds, expandedSelectedCompanyIds])
-
-  useEffect(() => {
     if (expandedKey == null) return
-    const panel = expandedBottomRef.current
-    if (!panel) return
+    const wrap = rubroTableWrapRef.current
+    if (!wrap) return
+    const run = () => {
+      const detailRow = wrap.querySelector(
+        `tr.rubro-summary-detail-row[data-group-detail-key="${CSS.escape(expandedKey)}"]`,
+      )
+      if (detailRow instanceof HTMLElement) {
+        scrollRubroExpandedDetailIntoView(wrap, detailRow)
+      }
+    }
     requestAnimationFrame(() => {
-      panel.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+      run()
+      requestAnimationFrame(run)
     })
-  }, [expandedKey])
+  }, [expandedKey, rubroTableWrapRef])
 
   useEffect(() => {
     if (innerNavGroupKey != null && innerNavGroupKey !== focusedGroupKey) {
@@ -1186,21 +1205,46 @@ export function RubroGroupsView({
     setClassifyError(null)
   }
 
+  async function applyClassificationTargets(
+    targets: ReturnType<typeof collectBulkClassificationTargets>,
+    classification: string,
+  ) {
+    const payload = classification === '' ? null : classification
+    for (const pairId of targets.pairIds) {
+      await onSetPairClassification(pairId, payload ?? '')
+    }
+    for (const txId of targets.bankPendingIds) {
+      await onSetClassification('bank', txId, payload ?? '')
+    }
+    for (const txId of targets.companyPendingIds) {
+      await onSetClassification('company', txId, payload ?? '')
+    }
+  }
+
   async function handleBulkClassify(classification: string) {
     setClassifyLoading(true)
     setClassifyError(null)
     try {
       const targets = collectBulkClassificationTargets(pickedBankGroups, pickedCompanyGroups)
-      const payload = classification === '' ? null : classification
-      for (const pairId of targets.pairIds) {
-        await onSetPairClassification(pairId, payload ?? '')
-      }
-      for (const txId of targets.bankPendingIds) {
-        await onSetClassification('bank', txId, payload ?? '')
-      }
-      for (const txId of targets.companyPendingIds) {
-        await onSetClassification('company', txId, payload ?? '')
-      }
+      await applyClassificationTargets(targets, classification)
+    } catch (e) {
+      setClassifyError(e instanceof Error ? e.message : String(e))
+      throw e
+    } finally {
+      setClassifyLoading(false)
+    }
+  }
+
+  async function handleSelectionBulkClassify(
+    selectedBank: readonly RubroMovementRef[],
+    selectedCompany: readonly RubroMovementRef[],
+    classification: string,
+  ) {
+    setClassifyLoading(true)
+    setClassifyError(null)
+    try {
+      const targets = collectSelectionClassificationTargets(selectedBank, selectedCompany)
+      await applyClassificationTargets(targets, classification)
     } catch (e) {
       setClassifyError(e instanceof Error ? e.message : String(e))
       throw e
@@ -1219,24 +1263,65 @@ export function RubroGroupsView({
           <button
             type="button"
             role="tab"
-            aria-selected={groupMode === 'specification'}
+            aria-selected={viewTab === 'specification'}
             className="detail-view-tab detail-view-tab--specification"
-            onClick={() => setGroupMode('specification')}
+            onClick={() => setViewTab('specification')}
           >
-            Mismo detalle en registro
+            Detalle/referencia
           </button>
           <button
             type="button"
             role="tab"
-            aria-selected={groupMode === 'classification'}
+            aria-selected={viewTab === 'classification'}
             className="detail-view-tab detail-view-tab--classification"
-            onClick={() => setGroupMode('classification')}
+            onClick={() => setViewTab('classification')}
           >
-            Por clasificación (rubro)
+            Clasificado manual
           </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={viewTab === 'reconciled'}
+            className="detail-view-tab detail-view-tab--reconciled"
+            onClick={() => setViewTab('reconciled')}
+          >
+            Conciliados (N:M)
+          </button>
+        </div>
+        <div className="rubro-view-mode-help">
+          <HelpPopoverButton
+            ariaLabel="Ayuda sobre la vista de grupos"
+            dialogLabel="Ayuda — grupos"
+          >
+            <RubroViewHelpText />
+          </HelpPopoverButton>
+          <HelpPopoverButton
+            variant="keyboard"
+            ariaLabel="Atajos de teclado en vista de grupos"
+            dialogLabel="Atajos — grupos"
+          >
+            <p className="keyboard-hint-popover-body">
+              Lista: <kbd>↑</kbd> <kbd>↓</kbd> recorren rubros · <kbd>Espacio</kbd> marca banco ·{' '}
+              <kbd>Shift</kbd>+<kbd>Espacio</kbd> marca empresa · <kbd>Ctrl</kbd>+<kbd>Enter</kbd>{' '}
+              despliega movimientos abajo · <kbd>↓</kbd> entra en movimientos del panel ·{' '}
+              <kbd>Enter</kbd> confirma en la comparación · <kbd>Esc</kbd> limpia marcas y movimientos
+              desplegados (el foco queda en la lista).
+            </p>
+          </HelpPopoverButton>
         </div>
       </div>
 
+      {viewTab === 'reconciled' ? (
+        <ReconciledGroupsTab
+          detail={detail}
+          sessionAmountTolerance={sessionAmountTolerance}
+          classificationReadOnly={classificationReadOnly}
+          classificationSuggestions={classificationSuggestions}
+          onSetGroupClassification={onSetGroupClassification}
+          onUnlinkGroup={onUnlinkGroup}
+        />
+      ) : (
+        <>
       <div className="rubro-view-toolbar" role="group" aria-label="Filtros vista por rubro">
         <label className="rubro-view-check">
           <input
@@ -1266,31 +1351,21 @@ export function RubroGroupsView({
         ) : null}
       </p>
 
-      <div className="keyboard-hint-anchor keyboard-hint-anchor--rubro-list">
-        <HelpPopoverButton
-          variant="keyboard"
-          ariaLabel="Atajos de teclado en vista por rubro"
-          dialogLabel="Atajos — vista por rubro"
-        >
-          <p className="keyboard-hint-popover-body">
-            Lista: <kbd>↑</kbd> <kbd>↓</kbd> recorren rubros · <kbd>Espacio</kbd> marca banco ·{' '}
-            <kbd>Shift</kbd>+<kbd>Espacio</kbd> marca empresa · <kbd>Ctrl</kbd>+<kbd>Enter</kbd>{' '}
-            despliega movimientos abajo · <kbd>↓</kbd> entra en movimientos del panel ·{' '}
-            <kbd>Enter</kbd> confirma en la comparación · <kbd>Esc</kbd> limpia marcas y movimientos
-            desplegados (el foco queda en la lista).
-          </p>
-        </HelpPopoverButton>
-      </div>
-
+      <div className="rubro-groups-panel">
       <div
         ref={rubroTableWrapRef}
-        className="table-wrap rubro-table-wrap table-wrap--scrollY rubro-table-wrap--keynav rubro-table-wrap--list-10"
+        className={[
+          'rubro-groups-table-wrap table-wrap rubro-table-wrap table-wrap--scrollY rubro-table-wrap--keynav rubro-table-wrap--list-10',
+          expandedKey != null ? 'rubro-table-wrap--has-expanded' : '',
+        ]
+          .filter(Boolean)
+          .join(' ')}
         style={rubroListWrapStyle}
         tabIndex={-1}
         onMouseEnter={handleTableMouseEnter}
         onFocus={handleTableMouseEnter}
       >
-        <table className="data-table rubro-summary-table">
+        <table className="data-table rubro-summary-table rubro-groups-table">
           <colgroup>
             {RUBRO_SUMMARY_COLS.map((width, i) => (
               <col key={i} style={{ width }} />
@@ -1323,7 +1398,7 @@ export function RubroGroupsView({
             {filtered.length === 0 ? (
               <tr>
                 <td colSpan={9} className="compare-empty">
-                  {groupMode === 'classification'
+                  {rubroGroupMode === 'classification'
                     ? 'No hay grupos con estos filtros. Asigná clasificación en Comparativa o quitá filtros.'
                     : 'No hay grupos con estos filtros. Probá «Por clasificación» o quitá filtros.'}
                 </td>
@@ -1339,13 +1414,20 @@ export function RubroGroupsView({
                   open ? 'rubro-summary-row--open' : '',
                   bankPicked ? 'rubro-summary-row--picked-bank' : '',
                   companyPicked ? 'rubro-summary-row--picked-company' : '',
-                  focusedGroupKey === g.groupKey ? 'rubro-summary-row--keyboard-focus' : '',
+                  focusedGroupKey === g.groupKey && innerNavGroupKey !== g.groupKey
+                    ? 'rubro-summary-row--keyboard-focus'
+                    : '',
                 ]
                   .filter(Boolean)
                   .join(' ')
                 return (
                   <Fragment key={g.groupKey}>
-                    <tr className={rowClassName} data-group-key={g.groupKey}>
+                    <tr
+                      className={rowClassName}
+                      data-group-key={g.groupKey}
+                      onClick={(ev) => handleRubroRowClick(ev, g.groupKey, open)}
+                      title={open ? 'Clic para ocultar movimientos' : 'Clic para ver movimientos'}
+                    >
                       <td>
                         <button
                           type="button"
@@ -1354,19 +1436,16 @@ export function RubroGroupsView({
                           aria-label={
                             open ? `Ocultar detalle de ${g.rubro}` : `Ver movimientos de ${g.rubro}`
                           }
-                          onClick={() => {
-                            if (!open) {
-                              setPickBankKeys(new Set())
-                              setPickCompanyKeys(new Set())
-                            }
-                            setExpandedKey(open ? null : g.groupKey)
+                          onClick={(ev) => {
+                            ev.stopPropagation()
+                            toggleGroupExpand(g.groupKey, open)
                           }}
                         >
-                          {open ? '▼' : '▶'}
+                          <RubroExpandChevron open={open} />
                         </button>
                       </td>
-                      <td className="rubro-name-cell">
-                        <strong>{g.rubro}</strong>
+                      <td className="rubro-name-cell scroll-x-muted" title={g.rubro}>
+                        {g.rubro}
                       </td>
                       <td className="rubro-td-num">{g.bankCount}</td>
                       <td className="rubro-td-amount">{formatAmount(g.bankSum)}</td>
@@ -1376,7 +1455,7 @@ export function RubroGroupsView({
                       <td className="rubro-td-estado">
                         {g.isSinRubro ? (
                           <span className="compare-badge compare-badge--estado rubro-badge--sin">
-                            {groupMode === 'classification' ? 'Etiquetar' : 'Sin texto'}
+                            {rubroGroupMode === 'classification' ? 'Etiquetar' : 'Sin texto'}
                           </span>
                         ) : g.squared ? (
                           <span className="compare-badge compare-badge--estado rubro-badge--ok">
@@ -1398,8 +1477,11 @@ export function RubroGroupsView({
                                   ? 'rubro-pick-btn rubro-pick-btn--bank rubro-pick-btn--active'
                                   : 'rubro-pick-btn rubro-pick-btn--bank'
                               }
-                              onClick={() => toggleBankKey(g.groupKey)}
-                              title="Agregar o quitar este grupo del lado banco en la comparación"
+                              onClick={(ev) => {
+                                ev.stopPropagation()
+                                toggleBankKey(g.groupKey)
+                              }}
+                              title="Comparar: agregar o quitar este grupo del lado banco (no despliega movimientos)"
                               aria-pressed={bankPicked}
                             >
                               Banco
@@ -1413,8 +1495,11 @@ export function RubroGroupsView({
                                   ? 'rubro-pick-btn rubro-pick-btn--company rubro-pick-btn--active'
                                   : 'rubro-pick-btn rubro-pick-btn--company'
                               }
-                              onClick={() => toggleCompanyKey(g.groupKey)}
-                              title="Agregar o quitar este grupo del lado empresa en la comparación"
+                              onClick={(ev) => {
+                                ev.stopPropagation()
+                                toggleCompanyKey(g.groupKey)
+                              }}
+                              title="Comparar: agregar o quitar este grupo del lado empresa (no despliega movimientos)"
                               aria-pressed={companyPicked}
                             >
                               Empresa
@@ -1423,12 +1508,78 @@ export function RubroGroupsView({
                         </div>
                       </td>
                     </tr>
+                    {open && expandedGroup?.groupKey === g.groupKey ? (
+                      <tr
+                        className="rubro-summary-detail-row"
+                        data-group-detail-key={g.groupKey}
+                      >
+                        <td colSpan={9} className="rubro-summary-detail-cell">
+                          <RubroExpandedBottomPanel
+                            group={g}
+                            onViewPair={handleViewPair}
+                            onScrollToGroup={handleScrollToGroup}
+                            onUnlinkGroup={onUnlinkGroup}
+                            detailKeyboardActive={innerNavGroupKey === g.groupKey}
+                            onExitDetailKeyboard={() => setInnerNavGroupKey(null)}
+                            onExitDetailAtEnd={() => {
+                              setInnerNavGroupKey(null)
+                              focusNextRubro()
+                            }}
+                            linkMode={expandedLinkMode}
+                            selectedBankIds={expandedSelectedBankIds}
+                            selectedCompanyIds={expandedSelectedCompanyIds}
+                            toggleBank={expandedToggleBank}
+                            toggleCompany={expandedToggleCompany}
+                            detailPairLinkOpen={expandedDetailPairLinkOpen}
+                          />
+                          {expandedLinkMode && expandedHasLinkSelection ? (
+                            <div className="ledger-selection-preview-anchor">
+                              <PendingLinkSelectionPanel
+                                selectedBank={expandedSelectedBank}
+                                selectedCompany={expandedSelectedCompany}
+                                bankSum={expandedBankSum}
+                                companySum={expandedCompanySum}
+                                delta={expandedDelta}
+                                hasBank={expandedHasBank}
+                                hasCompany={expandedHasCompany}
+                                bothSides={expandedBothSides}
+                                canGroupLink={expandedCanGroupLink}
+                                manualLinkLoading={manualLinkLoading}
+                                sessionAmountTolerance={sessionAmountTolerance}
+                                classificationReadOnly={classificationReadOnly}
+                                classificationSuggestions={classificationSuggestions}
+                                classifyLoading={classifyLoading}
+                                classifyError={classifyError}
+                                onBulkClassify={(classification) =>
+                                  handleSelectionBulkClassify(
+                                    expandedSelectedBank,
+                                    expandedSelectedCompany,
+                                    classification,
+                                  )
+                                }
+                                enterHint
+                                onViewPair={handleViewPair}
+                                onClear={clearExpandedLinkSelection}
+                                onCreateGroup={onCreateGroup}
+                                onConfirmPairLink={
+                                  onManualPair ? () => setExpandedDetailPairLinkOpen(true) : undefined
+                                }
+                              />
+                            </div>
+                          ) : null}
+                          {manualLinkError && expandedLinkMode && expandedHasLinkSelection ? (
+                            <p className="msg err rubro-expanded-link-err">{manualLinkError}</p>
+                          ) : null}
+                        </td>
+                      </tr>
+                    ) : null}
                   </Fragment>
                 )
               })
             )}
           </tbody>
         </table>
+      </div>
       </div>
 
       {hasComparePicks && (
@@ -1453,53 +1604,14 @@ export function RubroGroupsView({
           onScrollToGroup={handleScrollToGroup}
           onUnlinkGroup={onUnlinkGroup}
           onBulkClassify={handleBulkClassify}
+          onBulkClassifySelection={handleSelectionBulkClassify}
           onRemoveBankKey={toggleBankKey}
           onRemoveCompanyKey={toggleCompanyKey}
         />
       )}
 
-      {expandedGroup ? (
-        <RubroExpandedBottomPanel
-          panelRef={expandedBottomRef}
-          group={expandedGroup}
-          sessionAmountTolerance={sessionAmountTolerance}
-          manualLinkLoading={manualLinkLoading}
-          onCreateGroup={onCreateGroup}
-          onViewPair={handleViewPair}
-          onScrollToGroup={handleScrollToGroup}
-          onUnlinkGroup={onUnlinkGroup}
-          detailKeyboardActive={innerNavGroupKey === expandedGroup.groupKey}
-          onExitDetailKeyboard={() => setInnerNavGroupKey(null)}
-          onExitDetailAtEnd={() => {
-            setInnerNavGroupKey(null)
-            focusNextRubro()
-          }}
-          linkMode={expandedLinkMode}
-          selectedBankIds={expandedSelectedBankIds}
-          selectedCompanyIds={expandedSelectedCompanyIds}
-          selectedBank={expandedSelectedBank}
-          selectedCompany={expandedSelectedCompany}
-          toggleBank={expandedToggleBank}
-          toggleCompany={expandedToggleCompany}
-          detailPairLinkOpen={expandedDetailPairLinkOpen}
-          bankSum={expandedBankSum}
-          companySum={expandedCompanySum}
-          delta={expandedDelta}
-          hasBank={expandedHasBank}
-          hasCompany={expandedHasCompany}
-          bothSides={expandedBothSides}
-          canGroupLink={expandedCanGroupLink}
-          hasSelection={expandedHasLinkSelection}
-          onClearSelection={clearExpandedLinkSelection}
-          onConfirmPairLink={
-            onManualPair ? () => setExpandedDetailPairLinkOpen(true) : undefined
-          }
-        />
-      ) : null}
-
-      {manualLinkError && expandedGroup && expandedLinkMode && expandedHasLinkSelection ? (
-        <p className="msg err rubro-expanded-link-err">{manualLinkError}</p>
-      ) : null}
+        </>
+      )}
 
       {expandedDetailPairLinkOpen && expandedPairPrompt && onManualPair ? (
         <RubroLinkConfirmModal

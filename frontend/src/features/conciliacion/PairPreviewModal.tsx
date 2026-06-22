@@ -19,10 +19,6 @@ function MovementCard({
       <h4 className="counterpart-card-title">{title}</h4>
       <dl className="counterpart-card-dl">
         <div>
-          <dt>ID</dt>
-          <dd>{m.id}</dd>
-        </div>
-        <div>
           <dt>Fecha</dt>
           <dd>{formatDisplayDate(m.txDate)}</dd>
         </div>

@@ -9,6 +9,7 @@ import { movementSummaryLine } from './utils/counterpartUtils'
 import { formatAmount, formatDisplayDate } from './utils/format'
 import { deferredOriginTitle, hasDeferredOrigin } from './utils/deferredOrigin'
 import { ClassificationCombo } from './ClassificationCombo'
+import { UnlinkPairButton } from './UnlinkPairButton'
 
 type GroupEstado = { label: string; abbr: string; badgeClass: string }
 
@@ -57,7 +58,6 @@ function GroupMovementLine({ m }: { m: MovimientoDto }) {
   const desc = [m.reference, m.description].filter(Boolean).join(' · ')
   return (
     <div className="compare-group-mov-line">
-      <span className="compare-group-mov-id">{m.id}</span>
       <span className="compare-group-mov-date">{formatDisplayDate(m.txDate)}</span>
       <span className="compare-group-mov-amt">{formatAmount(m.amount)}</span>
       <span className="compare-group-mov-desc">{desc || movementSummaryLine(m)}</span>
@@ -153,7 +153,7 @@ function GroupSidePanel({
         <p className="compare-group-side-preview">
           {movements
             .slice(0, 2)
-            .map((m) => `#${m.id} ${formatAmount(m.amount)}`)
+            .map((m) => `${formatDisplayDate(m.txDate)} ${formatAmount(m.amount)}`)
             .join(' · ')}
           {movements.length > 2 ? ` · +${movements.length - 2} más` : ''}
         </p>
@@ -231,7 +231,7 @@ export function CompareGroupTableRows({
           ))}
         </div>
       </td>
-      <td colSpan={4} className="compare-group-side compare-group-side--bank compare-td-split-edge">
+      <td colSpan={3} className="compare-group-side compare-group-side--bank compare-td-split-edge">
         <GroupSidePanel
           side="bank"
           movements={banks}
@@ -240,7 +240,7 @@ export function CompareGroupTableRows({
           onToggleExpand={onToggleBankExpand}
         />
       </td>
-      <td colSpan={4} className="compare-group-side compare-group-side--company">
+      <td colSpan={3} className="compare-group-side compare-group-side--company">
         <GroupSidePanel
           side="company"
           movements={companies}
@@ -264,15 +264,13 @@ export function CompareGroupTableRows({
       <td className="compare-td-notes">{notesTools ?? null}</td>
       <td className="compare-td-unlink compare-group-actions">
         {selectedId != null && !sessionClosed && !classificationReadOnly && onUnlinkGroup ? (
-          <button
-            type="button"
-            className="pair-unlink-btn pair-unlink-btn--manual"
-            onClick={() => onUnlinkGroup(group.groupId)}
+          <UnlinkPairButton
+            variant="icon"
+            matchSource="MANUAL"
             title="Desvincular grupo (todos los movimientos vuelven a pendientes)"
-            aria-label="Desvincular grupo"
-          >
-            Desvincular
-          </button>
+            ariaLabel="Desvincular grupo"
+            onClick={() => onUnlinkGroup(group.groupId)}
+          />
         ) : null}
       </td>
     </tr>

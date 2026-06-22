@@ -1,4 +1,5 @@
 import type { MovimientoDto, SessionDetail } from '../types'
+import { formatAmount, formatDisplayDate } from './format'
 
 export type CounterpartInspectMode = 'fuzzy' | 'duplicate'
 export type CounterpartSide = 'bank' | 'company'
@@ -58,16 +59,20 @@ export function movementSummaryLine(m: MovimientoDto): string {
   return ref || '—'
 }
 
+/** Etiqueta legible para modales y encabezados (sin ID interno). */
+export function movementDisplayLabel(m: MovimientoDto): string {
+  const desc = movementSummaryLine(m)
+  const parts = [formatDisplayDate(m.txDate), formatAmount(m.amount)]
+  if (desc !== '—') parts.push(desc)
+  return parts.join(' · ')
+}
+
 /** Etiqueta corta en tabla (el detalle completo va en title / modal). */
 export function fuzzyMatchBadgeLabel(m: MovimientoDto): string | null {
-  if (m.fuzzyCounterpartId != null) {
-    return `Posible match · ID ${m.fuzzyCounterpartId}`
+  if (m.fuzzyCounterpartId != null || m.fuzzyHint?.trim()) {
+    return 'Posible match'
   }
-  const hint = m.fuzzyHint?.trim()
-  if (!hint) return null
-  const idMatch = hint.match(/ID\s+(\d+)/i)
-  if (idMatch) return `Posible match · ID ${idMatch[1]}`
-  return 'Posible match'
+  return null
 }
 
 export function hasFuzzyMatchHint(m: MovimientoDto): boolean {

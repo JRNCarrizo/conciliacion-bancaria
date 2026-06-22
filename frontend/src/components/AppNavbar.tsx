@@ -69,18 +69,30 @@ export function AppNavbar() {
         </Link>
 
         <div className="app-navbar-actions">
-          <ThemeToggle className="app-navbar-theme" />
+          <div className="app-navbar-toolbar">
+            <ThemeToggle className="app-navbar-theme" />
+            {isAuthenticated && user ? <ChatNavbarTrigger /> : null}
+          </div>
           {isAuthenticated && user ? (
             <>
-              <ChatNavbarTrigger />
+              <div className="app-navbar-divider" aria-hidden />
               <div className="app-navbar-session">
-                <span className="app-navbar-user" title={user.role}>
-                  <span className="app-navbar-user-name">{user.username}</span>
-                  <span className="app-navbar-user-role">{ROLE_LABEL[user.role] ?? user.role}</span>
-                </span>
+                <div className="app-navbar-user" title={user.role}>
+                  <span className="app-navbar-user-avatar" aria-hidden>
+                    {user.username.charAt(0).toUpperCase()}
+                  </span>
+                  <span className="app-navbar-user-text">
+                    <span className="app-navbar-user-name">{user.username}</span>
+                    <span
+                      className={`app-navbar-user-role app-navbar-user-role--${user.role.toLowerCase()}`}
+                    >
+                      {ROLE_LABEL[user.role] ?? user.role}
+                    </span>
+                  </span>
+                </div>
                 <button
                   type="button"
-                  className="btn-secondary app-navbar-logout"
+                  className="app-navbar-logout"
                   disabled={loggingOut}
                   onClick={handleLogoutClick}
                 >

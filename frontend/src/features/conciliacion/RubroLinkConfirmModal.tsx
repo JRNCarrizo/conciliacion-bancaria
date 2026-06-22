@@ -2,8 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { MovimientoDto } from './types'
 import type { RubroMovementRef } from './utils/rubroGroups'
-import { movementSummaryLine } from './utils/counterpartUtils'
-import { formatAmount, formatDisplayDate } from './utils/format'
+import { movementDisplayLabel } from './utils/counterpartUtils'
 
 export type PendingPairLinkPrompt = {
   bankId: number
@@ -77,9 +76,7 @@ export function usePendingPairLinkPicker(
 function MovementLine({ m }: { m: MovimientoDto }) {
   return (
     <p className="rubro-link-confirm-line">
-      <strong>ID {m.id}</strong> · {formatDisplayDate(m.txDate)} · {formatAmount(m.amount)}
-      <br />
-      <span className="rubro-link-confirm-desc">{movementSummaryLine(m)}</span>
+      <strong>{movementDisplayLabel(m)}</strong>
     </p>
   )
 }

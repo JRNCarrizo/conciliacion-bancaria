@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react'
-import { HelpPopoverButton } from './HelpPopoverButton'
 import { MovementMiniTable } from './MovementMiniTable'
 import { PairPreviewModal } from './PairPreviewModal'
 import { PendingLinkSelectionPanel } from './PendingLinkSelectionPanel'
@@ -12,6 +11,7 @@ import { resolvePairPreview } from './utils/pairLookup'
 import {
   allBankMovementRefs,
   allCompanyMovementRefs,
+  collectSelectionClassificationTargets,
   isRubroMovementLinkable,
   ledgerViewSummary,
 } from './utils/rubroGroups'
@@ -22,6 +22,10 @@ export function FullLedgerView({
   reconcileLocked,
   manualLinkLoading,
   manualLinkError,
+  classificationReadOnly,
+  classificationSuggestions,
+  onSetClassification,
+  onSetPairClassification,
   onManualPair,
   onCreateGroup,
   onScrollToComparisonRow,
@@ -33,6 +37,10 @@ export function FullLedgerView({
   reconcileLocked: boolean
   manualLinkLoading: boolean
   manualLinkError: string | null
+  classificationReadOnly: boolean
+  classificationSuggestions: readonly string[]
+  onSetClassification: (side: 'bank' | 'company', txId: number, classification: string) => void | Promise<void>
+  onSetPairClassification: (pairId: number, classification: string) => void | Promise<void>
   onManualPair?: (bankId: number, companyId: number) => void
   onCreateGroup?: (bankIds: number[], companyIds: number[]) => void | Promise<void>
   onScrollToComparisonRow?: (rowKey: string) => void
@@ -44,6 +52,8 @@ export function FullLedgerView({
 }) {
   const [viewPairId, setViewPairId] = useState<number | null>(null)
   const [ledgerPairLinkOpen, setLedgerPairLinkOpen] = useState(false)
+  const [classifyLoading, setClassifyLoading] = useState(false)
+  const [classifyError, setClassifyError] = useState<string | null>(null)
 
   const bankItems = useMemo(() => allBankMovementRefs(detail), [detail])
   const companyItems = useMemo(() => allCompanyMovementRefs(detail), [detail])
@@ -185,6 +195,29 @@ export function FullLedgerView({
     onScrollToComparisonRow?.(`group-${groupId}`)
   }
 
+  async function handleSelectionBulkClassify(classification: string) {
+    setClassifyLoading(true)
+    setClassifyError(null)
+    try {
+      const targets = collectSelectionClassificationTargets(selectedBank, selectedCompany)
+      const payload = classification === '' ? null : classification
+      for (const pairId of targets.pairIds) {
+        await onSetPairClassification(pairId, payload ?? '')
+      }
+      for (const txId of targets.bankPendingIds) {
+        await onSetClassification('bank', txId, payload ?? '')
+      }
+      for (const txId of targets.companyPendingIds) {
+        await onSetClassification('company', txId, payload ?? '')
+      }
+    } catch (e) {
+      setClassifyError(e instanceof Error ? e.message : String(e))
+      throw e
+    } finally {
+      setClassifyLoading(false)
+    }
+  }
+
   return (
     <div className="ledger-view">
       <div className="ledger-view-metrics" aria-label="Resumen del archivo completo">
@@ -210,43 +243,25 @@ export function FullLedgerView({
         </div>
       </div>
 
-      {linkMode || (!linkMode && (bankItems.length > 0 || companyItems.length > 0)) ? (
-        <div className="keyboard-hint-anchor keyboard-hint-anchor--ledger">
-          <HelpPopoverButton
-            variant="keyboard"
-            ariaLabel="Atajos de teclado en vista por archivo"
-            dialogLabel="Atajos — vista por archivo"
-          >
-            {linkMode ? (
-              <p className="keyboard-hint-popover-body">
-                Tocá <strong>pend.</strong> o pasá el mouse sobre una tabla: <kbd>↑</kbd> <kbd>↓</kbd>{' '}
-                recorren filas, <kbd>←</kbd> <kbd>→</kbd> cambian de tabla, <kbd>Espacio</kbd>{' '}
-                selecciona pendientes, <kbd>Enter</kbd> confirma el vínculo, <kbd>Esc</kbd> limpia la
-                selección (el foco queda en la tabla).
-              </p>
-            ) : (
-              <p className="keyboard-hint-popover-body">
-                Sobre una tabla: <kbd>↑</kbd> <kbd>↓</kbd> recorren filas; <kbd>←</kbd> <kbd>→</kbd>{' '}
-                pasan al otro lado.
-              </p>
-            )}
-          </HelpPopoverButton>
-        </div>
-      ) : reconcileLocked ? (
+      {reconcileLocked ? (
         <p className="ledger-view-readonly-hint">Sesión cerrada: solo consulta.</p>
       ) : null}
 
       {manualLinkError ? <p className="msg err ledger-view-link-err">{manualLinkError}</p> : null}
 
       <div
-        className="ledger-view-grid rubro-detail-grid"
+        className="ledger-tables-panel ledger-view-grid rubro-detail-grid rubro-detail-grid--panels"
         onMouseLeave={handleGridMouseLeave}
       >
         <MovementMiniTable
           side="bank"
-          title={`Extracto banco (${bankItems.length})`}
+          title="Extracto banco"
           items={bankItems}
           linkMode={linkMode}
+          panelLayout
+          adaptiveHeight
+          visibleRows={12}
+          hideLinkHint
           selectedTxIds={linkMode ? selectedBankIds : undefined}
           onToggleTxId={linkMode ? toggleBank : undefined}
           onViewPair={setViewPairId}
@@ -261,9 +276,13 @@ export function FullLedgerView({
         />
         <MovementMiniTable
           side="company"
-          title={`Libro empresa (${companyItems.length})`}
+          title="Libro empresa"
           items={companyItems}
           linkMode={linkMode}
+          panelLayout
+          adaptiveHeight
+          visibleRows={12}
+          hideLinkHint
           selectedTxIds={linkMode ? selectedCompanyIds : undefined}
           onToggleTxId={linkMode ? toggleCompany : undefined}
           onViewPair={setViewPairId}
@@ -291,10 +310,18 @@ export function FullLedgerView({
           canGroupLink={canGroupLink}
           manualLinkLoading={manualLinkLoading}
           sessionAmountTolerance={sessionAmountTolerance}
+          classificationReadOnly={classificationReadOnly}
+          classificationSuggestions={classificationSuggestions}
+          classifyLoading={classifyLoading}
+          classifyError={classifyError}
+          onBulkClassify={handleSelectionBulkClassify}
           enterHint
           showSelectionTables
           onViewPair={setViewPairId}
-          onClear={clearSelection}
+          onClear={() => {
+            clearSelection()
+            setClassifyError(null)
+          }}
           onCreateGroup={onCreateGroup}
           onConfirmPairLink={onManualPair ? () => setLedgerPairLinkOpen(true) : undefined}
         />

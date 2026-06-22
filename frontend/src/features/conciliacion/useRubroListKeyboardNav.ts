@@ -74,7 +74,7 @@ export function useRubroListKeyboardNav({
     if (row instanceof HTMLElement) {
       scrollTableRowIntoView(wrap, row)
     }
-  }, [focusedGroupKey, active, expandedKey, navIndex, innerNavGroupKey])
+  }, [focusedGroupKey, active, navIndex, innerNavGroupKey])
 
   const handleTableMouseEnter = useCallback(() => {
     setActive(true)

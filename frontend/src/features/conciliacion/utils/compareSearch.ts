@@ -1,6 +1,74 @@
 import type { ComparisonRow } from '../types'
 import { formatAmount } from './format'
-import { parseBalanceInput, parseTransactionId } from './parse'
+import { parseBalanceInput } from './parse'
+
+function normalizeSearchQuery(raw: string): string {
+  return raw
+    .trim()
+    .replace(/\uFF03/g, '#')
+    .replace(/\s+/g, ' ')
+}
+
+export type SearchQueryParts = {
+  rowNum: number | null
+  /** Texto para buscar en ref/desc/importe formateado. */
+  textNeedle: string
+  /** Consulta explícita de fila (#N / fila N) sin texto adicional. */
+  rowOnly: boolean
+}
+
+/** Coincide `#12`, `# 12`, `fila 12`, `fila12` (insensible a mayúsculas). */
+export function parseRowNumberQuery(raw: string): number | null {
+  return parseSearchQueryParts(raw).rowNum
+}
+
+/**
+ * Separa número de fila (#N / fila N / solo dígitos) del texto para buscar en ref/desc/importe.
+ * Con `#12` o `fila 12`, también busca «12» en el resto de columnas (la fila exacta va primero al ordenar).
+ */
+export function parseSearchQueryParts(raw: string): SearchQueryParts {
+  const t = normalizeSearchQuery(raw)
+  if (t === '') return { rowNum: null, textNeedle: '', rowOnly: false }
+
+  const hash = /^#\s*(\d+)(?:\s+(.*))?$/.exec(t)
+  if (hash) {
+    const n = parseInt(hash[1], 10)
+    const rest = hash[2]?.trim()
+    const rowOnly = !rest
+    return {
+      rowNum: n > 0 ? n : null,
+      textNeedle: rowOnly ? hash[1] : rest,
+      rowOnly,
+    }
+  }
+
+  const fila = /^fila\s*#?\s*(\d+)(?:\s+(.*))?$/i.exec(t)
+  if (fila) {
+    const n = parseInt(fila[1], 10)
+    const rest = fila[2]?.trim()
+    const rowOnly = !rest
+    return {
+      rowNum: n > 0 ? n : null,
+      textNeedle: rowOnly ? fila[1] : rest,
+      rowOnly,
+    }
+  }
+
+  if (/^\d+$/.test(t)) {
+    const n = parseInt(t, 10)
+    return { rowNum: n > 0 ? n : null, textNeedle: t, rowOnly: true }
+  }
+
+  return { rowNum: null, textNeedle: t, rowOnly: false }
+}
+
+export function isExactRowSearchMatch(
+  rowNumInBaseline: number | undefined,
+  rawQuery: string,
+): boolean {
+  const { rowNum } = parseSearchQueryParts(rawQuery)
+  return rowNum != null && rowMatchesRowNumber(rowNumInBaseline, rowNum)
+}
 
 /** Tolerancia en importes para coincidir con la búsqueda (centavos). */
 const AMOUNT_TOL = 0.005
@@ -61,8 +129,6 @@ function textHaystackForRow(row: ComparisonRow): string {
     const { bank, company, pair } = row
     const parts = [
       String(pair.pairId),
-      String(pair.bankTxId),
-      String(pair.companyTxId),
       bank.reference,
       bank.description,
       company.reference,
@@ -79,8 +145,6 @@ function textHaystackForRow(row: ComparisonRow): string {
     const { group, banks, companies } = row
     const parts = [
       String(group.groupId),
-      ...group.bankTxIds.map(String),
-      ...group.companyTxIds.map(String),
       formatAmount(group.bankSum),
       formatAmount(group.companySum),
     ]
@@ -90,37 +154,13 @@ function textHaystackForRow(row: ComparisonRow): string {
     return parts.filter((p) => p != null && String(p).trim() !== '').join(' \u2003 ')
   }
   const m = row.m
-  const parts = [
-    String(m.id),
-    m.reference,
-    m.description,
-    formatAmount(m.amount),
-  ]
+  const parts = [m.reference, m.description, formatAmount(m.amount)]
   if (m.accountingAmount != null) parts.push(formatAmount(m.accountingAmount))
   return parts.filter((p) => p != null && String(p).trim() !== '').join(' \u2003 ')
 }
 
-function rowMatchesId(row: ComparisonRow, idNum: number): boolean {
-  if (row.kind === 'pair') {
-    const { pair, bank, company } = row
-    return (
-      pair.pairId === idNum ||
-      pair.bankTxId === idNum ||
-      pair.companyTxId === idNum ||
-      bank.id === idNum ||
-      company.id === idNum
-    )
-  }
-  if (row.kind === 'group') {
-    return (
-      row.group.groupId === idNum ||
-      row.group.bankTxIds.includes(idNum) ||
-      row.group.companyTxIds.includes(idNum) ||
-      row.banks.some((m) => m.id === idNum) ||
-      row.companies.some((m) => m.id === idNum)
-    )
-  }
-  return row.m.id === idNum
+function rowMatchesRowNumber(rowNumInBaseline: number | undefined, queryRowNum: number): boolean {
+  return rowNumInBaseline != null && rowNumInBaseline === queryRowNum
 }
 
 function rowMatchesAmount(row: ComparisonRow, amount: number): boolean {
@@ -133,32 +173,37 @@ function rowMatchesText(row: ComparisonRow, needle: string): boolean {
 }
 
 /** Menor valor = mayor prioridad al ordenar resultados de búsqueda. */
-export const SEARCH_MATCH_ID = 0
+export const SEARCH_MATCH_ROW = 0
 export const SEARCH_MATCH_AMOUNT = 1
 export const SEARCH_MATCH_TEXT = 2
 
 /**
- * Prioridad de coincidencia: ID exacto → importe → texto (ref/desc).
+ * Prioridad de coincidencia: número de fila (#N) → importe → texto (ref/desc).
  * null si la fila no coincide con la consulta.
  */
-export function searchMatchPriority(row: ComparisonRow, rawQuery: string): number | null {
-  const q = rawQuery.trim()
+export function searchMatchPriority(
+  row: ComparisonRow,
+  rawQuery: string,
+  rowNumInBaseline?: number,
+): number | null {
+  const q = normalizeSearchQuery(rawQuery)
   if (q === '') return null
 
+  const { rowNum, textNeedle, rowOnly } = parseSearchQueryParts(q)
   let best: number | null = null
 
-  const idNum = parseTransactionId(q)
-  if (idNum != null && rowMatchesId(row, idNum)) {
-    best = SEARCH_MATCH_ID
+  if (rowNum != null && rowMatchesRowNumber(rowNumInBaseline, rowNum)) {
+    best = SEARCH_MATCH_ROW
   }
 
-  const parsedAmount = parseBalanceInput(q)
+  const amountSource = rowOnly ? '' : textNeedle && textNeedle !== String(rowNum) ? textNeedle : q
+  const parsedAmount = parseBalanceInput(amountSource)
   if (parsedAmount != null && rowMatchesAmount(row, parsedAmount)) {
     best = best === null ? SEARCH_MATCH_AMOUNT : Math.min(best, SEARCH_MATCH_AMOUNT)
   }
 
-  const needle = fold(q)
-  if (rowMatchesText(row, needle)) {
+  const needle = fold(textNeedle)
+  if (needle.length > 0 && rowMatchesText(row, needle)) {
     const textRank = SEARCH_MATCH_TEXT
     best = best === null ? textRank : Math.min(best, textRank)
   }
@@ -166,10 +211,25 @@ export function searchMatchPriority(row: ComparisonRow, rawQuery: string): numbe
   return best
 }
 
-/**
- * Coincide con ID exacto (movimiento o par), importe (misma lógica que saldos) o texto en ref/desc/importe formateado.
- * Vacío = no filtra.
- */
+/** Orden: fila exacta (#N) → prioridad de match → número de fila base. */
+export function compareSearchRowOrder(
+  a: ComparisonRow,
+  b: ComparisonRow,
+  rawQuery: string,
+  rowNumA: number | undefined,
+  rowNumB: number | undefined,
+): number {
+  const q = normalizeSearchQuery(rawQuery)
+  const aExact = isExactRowSearchMatch(rowNumA, q)
+  const bExact = isExactRowSearchMatch(rowNumB, q)
+  if (aExact !== bExact) return aExact ? -1 : 1
+
+  const pa = searchMatchPriority(a, q, rowNumA) ?? 99
+  const pb = searchMatchPriority(b, q, rowNumB) ?? 99
+  if (pa !== pb) return pa - pb
+  return (rowNumA ?? 0) - (rowNumB ?? 0)
+}
+
 function normClassification(s: string | null | undefined): string {
   return (s ?? '').trim()
 }
@@ -187,8 +247,12 @@ export function rowMatchesClassification(row: ComparisonRow, raw: string): boole
   return normClassification(row.m.pendingClassification) === sel
 }
 
-export function rowMatchesSearch(row: ComparisonRow, rawQuery: string): boolean {
+export function rowMatchesSearch(
+  row: ComparisonRow,
+  rawQuery: string,
+  rowNumInBaseline?: number,
+): boolean {
   const q = rawQuery.trim()
   if (q === '') return true
-  return searchMatchPriority(row, rawQuery) != null
+  return searchMatchPriority(row, rawQuery, rowNumInBaseline) != null
 }

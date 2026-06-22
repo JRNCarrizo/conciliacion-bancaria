@@ -25,6 +25,33 @@ function deferredPeekMeta(d: DeferredMovement): string {
   return parts.join(' · ')
 }
 
+function DeferredInboxIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M4 8.5V18a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8.5"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M3 8.5h18L14 3.5H10L3 8.5Z"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M10 13h4"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinecap="round"
+      />
+    </svg>
+  )
+}
+
 function DeferredRow({
   d,
   selectable,
@@ -48,11 +75,13 @@ function DeferredRow({
 
   return (
     <li
-      className={
-        expanded
-          ? 'session-deferred-item session-deferred-item--open'
-          : 'session-deferred-item session-deferred-item--compact'
-      }
+      className={[
+        'session-deferred-item',
+        expanded ? 'session-deferred-item--open' : 'session-deferred-item--compact',
+        selectable && selected ? 'session-deferred-item--selected' : '',
+      ]
+        .filter(Boolean)
+        .join(' ')}
     >
       {selectable ? (
         <label className="session-deferred-item-check" onClick={(e) => e.stopPropagation()}>
@@ -128,10 +157,11 @@ function DeferredRow({
   )
 }
 
-function DeferredPanelDisclosure({
+function DeferredPanelCard({
   id,
   title,
   count,
+  tone,
   badgeActive,
   meta,
   hint,
@@ -140,6 +170,7 @@ function DeferredPanelDisclosure({
   id: string
   title: string
   count: number
+  tone: 'pending' | 'into' | 'sent'
   badgeActive?: boolean
   meta?: string | null
   hint?: string
@@ -149,39 +180,46 @@ function DeferredPanelDisclosure({
   const badgeLabel = count === 1 ? '1 mov.' : `${count} mov.`
 
   return (
-    <div
-      className={
-        expanded
-          ? 'session-deferred-subpanel conc-panel-disclosure conc-panel-disclosure--open'
-          : 'session-deferred-subpanel conc-panel-disclosure conc-panel-disclosure--collapsed'
-      }
+    <article
+      className={[
+        'session-deferred-card',
+        `session-deferred-card--${tone}`,
+        expanded ? 'session-deferred-card--open' : 'session-deferred-card--collapsed',
+      ].join(' ')}
     >
       <button
         type="button"
         id={id}
         aria-expanded={expanded}
-        className="conc-panel-disclosure-summary session-deferred-subpanel-summary"
+        className="session-deferred-card-summary"
         onClick={() => setExpanded((open) => !open)}
       >
-        <span className="conc-panel-disclosure-title">{title}</span>
+        <span className="session-deferred-card-icon" aria-hidden />
+        <span className="session-deferred-card-copy">
+          <span className="session-deferred-card-title">{title}</span>
+          {!expanded && meta ? <span className="session-deferred-card-meta">{meta}</span> : null}
+        </span>
         <span
-          className={
-            badgeActive
-              ? 'conc-panel-disclosure-badge conc-panel-disclosure-badge--active'
-              : 'conc-panel-disclosure-badge conc-panel-disclosure-badge--neutral'
-          }
+          className={[
+            'session-deferred-card-badge',
+            badgeActive ? 'session-deferred-card-badge--active' : '',
+          ]
+            .filter(Boolean)
+            .join(' ')}
         >
           {badgeLabel}
         </span>
-        {!expanded && meta ? <span className="conc-panel-disclosure-meta">{meta}</span> : null}
+        <span className="session-deferred-card-chevron" aria-hidden>
+          {expanded ? '▾' : '▸'}
+        </span>
       </button>
       {expanded ? (
-        <div className="conc-panel-disclosure-body session-deferred-subpanel-body">
+        <div className="session-deferred-card-body">
           {hint ? <p className="session-deferred-panel-lead">{hint}</p> : null}
           {children}
         </div>
       ) : null}
-    </div>
+    </article>
   )
 }
 
@@ -251,6 +289,9 @@ export function SessionDeferredPanels({
   const totalMovements =
     pendingIncorporateCount + deferredIntoSession.length + sentPendingFromHere.length
 
+  const hasPendingWork = pendingIncorporateCount > 0 || sentPendingFromHere.length > 0
+  const isEmpty = totalMovements <= 0
+
   const sectionMeta = useMemo(() => {
     const parts: string[] = []
     if (pendingIncorporateCount > 0) {
@@ -274,7 +315,7 @@ export function SessionDeferredPanels({
           : `${sentPendingFromHere.length} enviados pendientes`,
       )
     }
-    return parts.length > 0 ? parts.join(' · ') : 'Expandí para ver el detalle'
+    return parts.length > 0 ? parts.join(' · ') : null
   }, [pendingIncorporateCount, deferredIntoSession.length, sentPendingFromHere.length])
 
   async function handleIncorporate() {
@@ -320,15 +361,6 @@ export function SessionDeferredPanels({
     }
   }
 
-  if (totalMovements <= 0) {
-    return null
-  }
-
-  const hasPendingWork = pendingIncorporateCount > 0 || sentPendingFromHere.length > 0
-
-  const sectionBadge =
-    totalMovements === 1 ? '1 movimiento' : `${totalMovements} movimientos`
-
   const incorporatePeek =
     available.length > 0
       ? available
@@ -355,49 +387,105 @@ export function SessionDeferredPanels({
           .join(' · ')
       : null
 
+  const emptyCollapsedHint = 'Usá Diferir en pendientes de la tabla'
+
   return (
     <section
-      className={
-        sectionExpanded
-          ? 'session-deferred-disclosure conc-panel-disclosure conc-panel-disclosure--open'
-          : 'session-deferred-disclosure conc-panel-disclosure conc-panel-disclosure--collapsed'
-      }
+      className={[
+        'session-deferred-hub',
+        isEmpty ? 'session-deferred-hub--empty' : '',
+        sectionExpanded ? 'session-deferred-hub--open' : 'session-deferred-hub--collapsed',
+        !isEmpty && hasPendingWork ? 'session-deferred-hub--attention' : '',
+      ]
+        .filter(Boolean)
+        .join(' ')}
       aria-labelledby="session-deferred-title"
     >
       <button
         type="button"
         id="session-deferred-title"
         aria-expanded={sectionExpanded}
-        className="conc-panel-disclosure-summary"
+        className="session-deferred-hub-header"
         onClick={() => setSectionExpanded((open) => !open)}
       >
-        <span className="conc-panel-disclosure-title">Diferidos entre conciliaciones</span>
-        <span
-          className={
-            hasPendingWork
-              ? 'conc-panel-disclosure-badge conc-panel-disclosure-badge--active'
-              : 'conc-panel-disclosure-badge conc-panel-disclosure-badge--neutral'
-          }
-        >
-          {sectionBadge}
-        </span>
-        {!sectionExpanded ? (
-          <span className="conc-panel-disclosure-meta">{sectionMeta}</span>
+        <div className="session-deferred-hub-icon-wrap" aria-hidden>
+          <DeferredInboxIcon className="session-deferred-hub-icon" />
+        </div>
+        <div className="session-deferred-hub-copy">
+          <span className="session-deferred-hub-eyebrow">Bolsa de diferidos</span>
+          <span className="session-deferred-hub-title">
+            {isEmpty ? 'Movimientos para otra conciliación' : 'Diferidos entre conciliaciones'}
+          </span>
+          {!sectionExpanded ? (
+            <span className="session-deferred-hub-lead">
+              {isEmpty ? emptyCollapsedHint : sectionMeta ?? 'Expandí para ver el detalle'}
+            </span>
+          ) : null}
+        </div>
+        {!isEmpty ? (
+          <div className="session-deferred-hub-stats" aria-label="Resumen">
+            {hasIncorporatePanel ? (
+              <span
+                className={[
+                  'session-deferred-stat-chip',
+                  'session-deferred-stat-chip--pending',
+                  pendingIncorporateCount > 0 ? 'session-deferred-stat-chip--hot' : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
+              >
+                <span className="session-deferred-stat-chip-label">Para incorporar</span>
+                <strong>{pendingIncorporateCount}</strong>
+              </span>
+            ) : null}
+            {deferredIntoSession.length > 0 ? (
+              <span className="session-deferred-stat-chip session-deferred-stat-chip--into">
+                <span className="session-deferred-stat-chip-label">Incorporados</span>
+                <strong>{deferredIntoSession.length}</strong>
+              </span>
+            ) : null}
+            {sentPendingFromHere.length > 0 ? (
+              <span className="session-deferred-stat-chip session-deferred-stat-chip--sent session-deferred-stat-chip--hot">
+                <span className="session-deferred-stat-chip-label">Enviados</span>
+                <strong>{sentPendingFromHere.length}</strong>
+              </span>
+            ) : null}
+          </div>
         ) : null}
+        <span className="session-deferred-hub-chevron" aria-hidden>
+          {sectionExpanded ? '▾' : '▸'}
+        </span>
       </button>
 
       {sectionExpanded ? (
-        <div className="conc-panel-disclosure-body session-deferred-disclosure-body">
+        <div className="session-deferred-hub-body">
+          {isEmpty ? (
+            <p className="session-deferred-empty-lead">
+              En la tabla de filtros, usá el botón <strong>Diferir</strong> en un pendiente para
+              guardarlo y conciliarlo en otro período. Acá verás lo que envíes, lo que traigas de
+              sesiones anteriores y lo incorporado en esta sesión.
+            </p>
+          ) : (
+            <>
+          {pendingIncorporateCount > 0 ? (
+            <div className="session-deferred-alert" role="status">
+              Tenés <strong>{pendingIncorporateCount}</strong> movimiento
+              {pendingIncorporateCount === 1 ? '' : 's'} de sesiones anteriores listo
+              {pendingIncorporateCount === 1 ? '' : 's'} para incorporar en esta conciliación.
+            </div>
+          ) : null}
+
           {hasIncorporatePanel ? (
-            <DeferredPanelDisclosure
+            <DeferredPanelCard
               id="session-deferred-incorporate"
               title="Para incorporar"
               count={pendingIncorporateCount}
+              tone="pending"
               badgeActive={pendingIncorporateCount > 0}
               meta={incorporatePeek}
               hint="Movimientos guardados en sesiones anteriores. Seleccioná cuáles agregar a esta sesión."
             >
-              {availableLoading ? <p className="subtle">Cargando diferidos…</p> : null}
+              {availableLoading ? <p className="session-deferred-loading">Cargando diferidos…</p> : null}
               {availableError ? <p className="msg err">{availableError}</p> : null}
               {!availableLoading && available.length > 0 ? (
                 <>
@@ -423,7 +511,7 @@ export function SessionDeferredPanels({
                   <div className="session-deferred-actions">
                     <button
                       type="button"
-                      className="btn-import"
+                      className="btn-import session-deferred-incorporate-btn"
                       disabled={readOnly || incorporateLoading || selectedIds.size === 0}
                       onClick={() => void handleIncorporate()}
                     >
@@ -435,14 +523,15 @@ export function SessionDeferredPanels({
                 </>
               ) : null}
               {incorporateMsg ? <p className="session-deferred-feedback">{incorporateMsg}</p> : null}
-            </DeferredPanelDisclosure>
+            </DeferredPanelCard>
           ) : null}
 
           {deferredIntoSession.length > 0 ? (
-            <DeferredPanelDisclosure
+            <DeferredPanelCard
               id="session-deferred-into"
               title="Incorporados en esta sesión"
               count={deferredIntoSession.length}
+              tone="into"
               meta={intoPeek}
               hint="Traídos desde diferidos anteriores. En la tabla aparecen con Dif←; filtrá con «Incorporado dif.»."
             >
@@ -451,14 +540,15 @@ export function SessionDeferredPanels({
                   <DeferredRow key={d.id} d={d} readOnly={readOnly} />
                 ))}
               </ul>
-            </DeferredPanelDisclosure>
+            </DeferredPanelCard>
           ) : null}
 
           {sentPendingFromHere.length > 0 ? (
-            <DeferredPanelDisclosure
+            <DeferredPanelCard
               id="session-deferred-sent"
               title="Enviados a otra conciliación"
               count={sentPendingFromHere.length}
+              tone="sent"
               badgeActive
               meta={sentPeek}
               hint="Diferidos desde esta sesión aún sin incorporar. Podés restaurarlos si la sesión sigue abierta."
@@ -478,8 +568,10 @@ export function SessionDeferredPanels({
                   />
                 ))}
               </ul>
-            </DeferredPanelDisclosure>
+            </DeferredPanelCard>
           ) : null}
+            </>
+          )}
         </div>
       ) : null}
     </section>

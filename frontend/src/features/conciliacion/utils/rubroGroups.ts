@@ -2,7 +2,7 @@ import type { MovimientoDto, SessionDetail } from '../types'
 import { coerceAmount } from './effectivePairKind'
 import { movementSummaryLine } from './counterpartUtils'
 
-export const SIN_RUBRO_LABEL = '(Sin rubro)'
+export const SIN_RUBRO_LABEL = '(Sin clasificar)'
 export const SIN_DETALLE_LABEL = '(Sin detalle)'
 
 export type RubroGroupMode = 'classification' | 'specification'
@@ -12,6 +12,8 @@ export type RubroMovementRef = {
   m: MovimientoDto
   pairId: number | null
   groupId: number | null
+  /** Clasificación del grupo N:M, o «Grupo #id» si aún no tiene rubro. */
+  groupLabel?: string | null
 }
 
 export type RubroGroupRow = {
@@ -83,6 +85,20 @@ function groupIdByCompanyTx(detail: SessionDetail): Map<number, number> {
   return m
 }
 
+function groupLabelsById(detail: SessionDetail): Map<number, string> {
+  const m = new Map<number, string>()
+  for (const g of detail.groups ?? []) {
+    const label = g.classification?.trim()
+    m.set(g.groupId, label ? label : `Grupo #${g.groupId}`)
+  }
+  return m
+}
+
+function groupLabelFor(labels: Map<number, string>, groupId: number | null | undefined): string | null {
+  if (groupId == null) return null
+  return labels.get(groupId) ?? `Grupo #${groupId}`
+}
+
 export function isRubroMovementLinkable(ref: RubroMovementRef): boolean {
   return ref.pairId == null && ref.groupId == null
 }
@@ -110,6 +126,7 @@ function buildGroupsInternal(
   const companyPair = pairIdByCompanyTx(detail)
   const bankGroup = groupIdByBankTx(detail)
   const companyGroup = groupIdByCompanyTx(detail)
+  const groupLabels = groupLabelsById(detail)
 
   type Acc = {
     displayLabel: string
@@ -150,6 +167,7 @@ function buildGroupsInternal(
       m,
       pairId: bankPair.get(m.id) ?? null,
       groupId: bankGroup.get(m.id) ?? null,
+      groupLabel: groupLabelFor(groupLabels, bankGroup.get(m.id)),
     })
   }
 
@@ -163,6 +181,7 @@ function buildGroupsInternal(
       m,
       pairId: companyPair.get(m.id) ?? null,
       groupId: companyGroup.get(m.id) ?? null,
+      groupLabel: groupLabelFor(groupLabels, companyGroup.get(m.id)),
     })
   }
 
@@ -326,6 +345,18 @@ export function bulkClassificationTargetCount(t: BulkClassificationTarget): numb
   return t.bankPendingIds.length + t.companyPendingIds.length + t.pairIds.length
 }
 
+/** Pendientes elegidos en el panel de vinculación (vista previa de selección). */
+export function collectSelectionClassificationTargets(
+  selectedBank: readonly RubroMovementRef[],
+  selectedCompany: readonly RubroMovementRef[],
+): BulkClassificationTarget {
+  return {
+    bankPendingIds: selectedBank.filter(isRubroMovementLinkable).map((i) => i.m.id),
+    companyPendingIds: selectedCompany.filter(isRubroMovementLinkable).map((i) => i.m.id),
+    pairIds: [],
+  }
+}
+
 export function rubroGroupsSummary(groups: RubroGroupRow[]) {
   const withRubro = groups.filter((g) => !g.isSinRubro)
   const squared = withRubro.filter((g) => g.squared).length
@@ -343,23 +374,33 @@ export function rubroGroupsSummary(groups: RubroGroupRow[]) {
 export function allBankMovementRefs(detail: SessionDetail): RubroMovementRef[] {
   const pairMap = pairIdByBankTx(detail)
   const groupMap = groupIdByBankTx(detail)
-  return detail.bankTransactions.map((m) => ({
-    side: 'bank',
-    m,
-    pairId: pairMap.get(m.id) ?? null,
-    groupId: groupMap.get(m.id) ?? null,
-  }))
+  const groupLabels = groupLabelsById(detail)
+  return detail.bankTransactions.map((m) => {
+    const groupId = groupMap.get(m.id) ?? null
+    return {
+      side: 'bank',
+      m,
+      pairId: pairMap.get(m.id) ?? null,
+      groupId,
+      groupLabel: groupLabelFor(groupLabels, groupId),
+    }
+  })
 }
 
 export function allCompanyMovementRefs(detail: SessionDetail): RubroMovementRef[] {
   const pairMap = pairIdByCompanyTx(detail)
   const groupMap = groupIdByCompanyTx(detail)
-  return detail.companyTransactions.map((m) => ({
-    side: 'company',
-    m,
-    pairId: pairMap.get(m.id) ?? null,
-    groupId: groupMap.get(m.id) ?? null,
-  }))
+  const groupLabels = groupLabelsById(detail)
+  return detail.companyTransactions.map((m) => {
+    const groupId = groupMap.get(m.id) ?? null
+    return {
+      side: 'company',
+      m,
+      pairId: pairMap.get(m.id) ?? null,
+      groupId,
+      groupLabel: groupLabelFor(groupLabels, groupId),
+    }
+  })
 }
 
 export function ledgerViewSummary(detail: SessionDetail) {

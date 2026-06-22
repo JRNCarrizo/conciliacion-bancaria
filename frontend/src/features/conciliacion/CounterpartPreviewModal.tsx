@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import type { MovimientoDto } from './types'
 import type { CounterpartInspectMode, CounterpartSide } from './utils/counterpartUtils'
-import { comparisonRowKey, movementSummaryLine } from './utils/counterpartUtils'
+import { comparisonRowKey, movementDisplayLabel, movementSummaryLine } from './utils/counterpartUtils'
 import { formatAmount, formatDisplayDate } from './utils/format'
 
 function MovementCard({
@@ -21,10 +21,6 @@ function MovementCard({
     >
       <h4 className="counterpart-card-title">{title}</h4>
       <dl className="counterpart-card-dl">
-        <div>
-          <dt>ID</dt>
-          <dd>{m.id}</dd>
-        </div>
         <div>
           <dt>Fecha</dt>
           <dd>{formatDisplayDate(m.txDate)}</dd>
@@ -161,8 +157,8 @@ export function CounterpartPreviewModal({
                       <MovementCard
                         title={
                           side === 'bank'
-                            ? `Banco · ID ${s.id}`
-                            : `Empresa · ID ${s.id}`
+                            ? `Banco · ${movementDisplayLabel(s)}`
+                            : `Empresa · ${movementDisplayLabel(s)}`
                         }
                         m={s}
                         side={side}

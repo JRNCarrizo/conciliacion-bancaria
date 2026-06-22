@@ -20,6 +20,7 @@ export function MovementMiniTable({
   visibleRows = 10,
   adaptiveHeight = false,
   hideLinkHint = false,
+  panelLayout = false,
 }: {
   side: 'bank' | 'company'
   title: string
@@ -45,23 +46,38 @@ export function MovementMiniTable({
   }
   onTableMouseEnter?: () => void
   /** Filas visibles antes de scroll (vista previa usa menos). */
-  visibleRows?: 5 | 10
+  visibleRows?: 5 | 10 | 12
   /** Altura según cantidad de filas (mín. 1, máx. visibleRows). */
   adaptiveHeight?: boolean
   /** Oculta el hint de pend. (el panel padre ya lo explica). */
   hideLinkHint?: boolean
+  /** Tarjeta con encabezado de color (vista grupos expandida). */
+  panelLayout?: boolean
 }) {
   if (items.length === 0) {
     return (
-      <div className={`rubro-detail-side rubro-detail-side--${side}`}>
-        <h4 className="rubro-detail-side-title">{title}</h4>
+      <div
+        className={[
+          `rubro-detail-side rubro-detail-side--${side}`,
+          panelLayout ? 'rubro-detail-panel' : '',
+        ]
+          .filter(Boolean)
+          .join(' ')}
+      >
+        {panelLayout ? (
+          <div className="rubro-detail-panel-head">
+            <h4 className="rubro-detail-side-title">{title}</h4>
+          </div>
+        ) : (
+          <h4 className="rubro-detail-side-title">{title}</h4>
+        )}
         <p className="rubro-detail-empty">Sin movimientos.</p>
       </div>
     )
   }
 
-  const keyboardActive = keyboardNav?.tableActive === true
   const adaptiveRowCount = Math.min(visibleRows, Math.max(1, items.length))
+  const fitsContent = adaptiveHeight && items.length <= visibleRows
   const tableWrapStyle = adaptiveHeight
     ? ({ '--rubro-detail-visible-rows': adaptiveRowCount } as CSSProperties)
     : undefined
@@ -70,26 +86,35 @@ export function MovementMiniTable({
     <div
       className={[
         `rubro-detail-side rubro-detail-side--${side}`,
-        keyboardActive ? 'rubro-detail-side--keyboard-active' : '',
+        panelLayout ? 'rubro-detail-panel' : '',
       ]
         .filter(Boolean)
         .join(' ')}
     >
-      <h4 className="rubro-detail-side-title">{title}</h4>
+      {panelLayout ? (
+        <div className="rubro-detail-panel-head">
+          <h4 className="rubro-detail-side-title">{title}</h4>
+          <span className="rubro-detail-panel-count">{items.length}</span>
+        </div>
+      ) : (
+        <h4 className="rubro-detail-side-title">{title}</h4>
+      )}
       {linkMode && !hideLinkHint ? (
         <p className="rubro-detail-link-hint">
-          Tocá <strong>pend.</strong> para{' '}
+          Tocá la <strong>fila</strong> del pendiente para{' '}
           {selectedTxIds != null ? 'elegir uno o más movimientos' : 'elegir el movimiento'}; otro clic en
-          el mismo lo quita.
+          la misma fila lo quita.
         </p>
       ) : null}
       <div
         ref={tableWrapRef}
         className={[
-          'table-wrap table-wrap--scrollY rubro-detail-table-wrap',
+          'table-wrap rubro-detail-table-wrap',
+          adaptiveHeight ? '' : 'table-wrap--scrollY',
           adaptiveHeight
             ? 'rubro-detail-table-wrap--adaptive'
             : `rubro-detail-table-wrap--list-${visibleRows}`,
+          fitsContent ? 'rubro-detail-table-wrap--fit' : adaptiveHeight ? 'table-wrap--scrollY' : '',
           keyboardNav != null ? 'rubro-detail-table-wrap--keynav' : '',
         ]
           .filter(Boolean)
@@ -106,21 +131,21 @@ export function MovementMiniTable({
       >
         <table className="data-table rubro-detail-table">
           <colgroup>
-            <col className="rubro-detail-col-id" />
+            <col className="rubro-detail-col-estado" />
             <col className="rubro-detail-col-date" />
             <col className="rubro-detail-col-amount" />
             <col className="rubro-detail-col-desc" />
           </colgroup>
           <thead>
             <tr>
-              <th>ID</th>
+              <th>Estado</th>
               <th>Fecha</th>
               <th>Importe</th>
               <th>Detalle</th>
             </tr>
           </thead>
           <tbody>
-            {items.map(({ m, pairId, groupId }) => {
+            {items.map(({ m, pairId, groupId, groupLabel }) => {
               const pending = pairId == null && groupId == null
               const canToggle = linkMode && pending && onToggleTxId != null
               const selected =
@@ -131,15 +156,23 @@ export function MovementMiniTable({
                   key={m.id}
                   data-tx-id={m.id}
                   className={[
+                    canToggle ? 'rubro-detail-row--linkable' : '',
                     selected ? 'rubro-detail-row--selected' : '',
                     keyboardFocused ? 'rubro-detail-row--keyboard-focus' : '',
                   ]
                     .filter(Boolean)
                     .join(' ') || undefined}
+                  aria-selected={canToggle ? selected : undefined}
+                  onClick={
+                    canToggle
+                      ? () => {
+                          onToggleTxId!(m.id)
+                        }
+                      : undefined
+                  }
                 >
-                  <td className="rubro-detail-id-td">
-                    <span className="rubro-detail-id-cell">
-                      <span className="rubro-detail-id-num">{m.id}</span>
+                  <td className="rubro-detail-estado-td">
+                    <span className="rubro-detail-estado-cell">
                       {pairId != null ? (
                         <button
                           type="button"
@@ -157,7 +190,11 @@ export function MovementMiniTable({
                           <button
                             type="button"
                             className="rubro-detail-group-badge rubro-detail-group-badge--btn"
-                            title={`Grupo #${groupId}. Ir a la fila en comparativa.`}
+                            title={
+                              groupLabel != null
+                                ? `${groupLabel}. Ir a la fila en comparativa.`
+                                : `Grupo #${groupId}. Ir a la fila en comparativa.`
+                            }
                             onClick={(ev) => {
                               ev.stopPropagation()
                               onScrollToGroup?.(groupId)
@@ -181,39 +218,31 @@ export function MovementMiniTable({
                           ) : null}
                         </span>
                       ) : pending ? (
-                        linkMode && onToggleTxId != null ? (
-                          <button
-                            type="button"
-                            className={
-                              selected
-                                ? 'rubro-detail-pending-btn rubro-detail-pending-btn--active'
-                                : 'rubro-detail-pending-btn'
-                            }
-                            disabled={!canToggle}
-                            aria-pressed={selected}
-                            title={
-                              selected
-                                ? 'Quitar selección para vincular'
-                                : 'Seleccionar para vincular con el otro lado'
-                            }
-                            onClick={(ev) => {
-                              ev.stopPropagation()
-                              if (canToggle) onToggleTxId(m.id)
-                            }}
-                          >
-                            pend.
-                          </button>
-                        ) : (
-                          <span className="rubro-detail-pending-badge" title="Pendiente de conciliar">
-                            pend.
-                          </span>
-                        )
+                        <span
+                          className={
+                            selected
+                              ? 'rubro-detail-pending-badge rubro-detail-pending-badge--selected'
+                              : 'rubro-detail-pending-badge'
+                          }
+                          title="Pendiente de conciliar"
+                        >
+                          pend.
+                        </span>
                       ) : null}
                     </span>
                   </td>
                   <td className="cell-date-nowrap">{formatDisplayDate(m.txDate)}</td>
                   <td>{formatAmount(m.amount)}</td>
-                  <td className="cell-desc">{movementSummaryLine(m)}</td>
+                  <td className="rubro-detail-desc-td">
+                    <div
+                      className="cell-desc-inner scroll-x-muted"
+                      title={movementSummaryLine(m)}
+                      onMouseDown={(ev) => ev.stopPropagation()}
+                      onClick={(ev) => ev.stopPropagation()}
+                    >
+                      {movementSummaryLine(m)}
+                    </div>
+                  </td>
                 </tr>
               )
             })}

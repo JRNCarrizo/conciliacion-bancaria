@@ -39,7 +39,7 @@ import {
   useAuthenticatedBlobUrl,
 } from './api/authenticatedBlob'
 import { parseError } from './api/http'
-import { rowMatchesClassification, rowMatchesSearch, searchMatchPriority } from './utils/compareSearch'
+import { rowMatchesClassification, rowMatchesSearch, compareSearchRowOrder } from './utils/compareSearch'
 import {
   coerceAmount,
   effectivePairKindFromAmounts,
@@ -69,12 +69,22 @@ import { RubroGroupsView } from './RubroGroupsView'
 import { RubroLinkConfirmModal } from './RubroLinkConfirmModal'
 import { usePendingMultiLinkPicker } from './usePendingMultiLinkPicker'
 import { CompareGroupTableRows, compareGroupSideKey } from './CompareGroupTableRows'
+import { CompareTableColumnResizeRails } from './CompareTableColumnResizeRails'
 import {
   findDuplicateSiblings,
+  findMovementInSession,
   fuzzyMatchBadgeLabel,
+  movementDisplayLabel,
   resolveFuzzyCounterpart,
   type CounterpartInspectRequest,
 } from './utils/counterpartUtils'
+import {
+  beginCompareColumnResize,
+  loadCompareColumnWidths,
+  measureCompareTableColumnWidths,
+  saveCompareColumnWidths,
+  compareTableTotalWidth,
+} from './utils/compareTableColumns'
 import { SessionCheckpointsSection } from './SessionCheckpointsSection'
 import { SessionDisplayNameEditor, SessionHistoryList } from './SessionHistoryList'
 import { SessionSourceFiles } from './SessionSourceFiles'
@@ -85,6 +95,7 @@ import { createReconciliationGroup, deleteReconciliationGroup } from './api/grou
 import {
   allBankMovementRefs,
   allCompanyMovementRefs,
+  collectSelectionClassificationTargets,
   isRubroMovementLinkable,
 } from './utils/rubroGroups'
 import { ShareInChatButton } from './ShareInChatButton'
@@ -186,6 +197,17 @@ function InfoCircleIcon({ className }: { className?: string }) {
   )
 }
 
+function movementModalLabel(
+  detail: SessionDetail | null,
+  side: 'bank' | 'company',
+  txId: number,
+): string {
+  const sideLabel = side === 'bank' ? 'Banco' : 'Empresa'
+  if (!detail) return sideLabel
+  const m = findMovementInSession(detail, side, txId)
+  return m ? `${sideLabel} · ${movementDisplayLabel(m)}` : sideLabel
+}
+
 function CompareViewHelpText({
   effectiveSessionAmountTolerance,
 }: {
@@ -193,9 +215,12 @@ function CompareViewHelpText({
 }) {
   return (
     <>
-      Tocá un color (o «Todos») para ver solo filas de ese estado. En la barra de filtros, buscá por ID,
-      referencia, descripción o importe; filtrá por clasificación y acotá por fechas. La grilla se ordena:
-      pares, pendientes banco, pendientes empresa. El icono ⌨ resume los atajos para vincular pendientes.
+      Tocá un color (o «Todos») para ver solo filas de ese estado. En la barra de filtros, buscá por número de fila
+      (#12, fila 12 o solo el número), referencia, descripción o importe. Si buscás por fila, esa
+      fila va primero y debajo el resto de coincidencias; filtrá por clasificación y acotá por fechas. La grilla se
+      ordena: pares, pendientes banco, pendientes empresa. En «Ref. / desc.» podés arrastrar la línea
+      vertical del encabezado para ensanchar el detalle (el resto de columnas mantiene su ancho; si no
+      entra, desplazate con scroll horizontal). El icono ⌨ resume los atajos para vincular pendientes.
       {effectiveSessionAmountTolerance !== undefined ? (
         <>
           {' '}
@@ -205,25 +230,6 @@ function CompareViewHelpText({
       ) : (
         <> «Δ importe» usa umbral 0,02 hasta que concilies con tolerancia propia.</>
       )}
-    </>
-  )
-}
-
-function CompleteViewHelpText() {
-  return (
-    <>
-      Todas las filas en una sola tabla, ordenadas por fecha. En cada par se usa la fecha más temprana
-      entre banco y empresa. Los pendientes muestran solo un lado; el otro queda vacío (—). Debajo de
-      la leyenda, la misma barra: búsqueda y filtro por clasificación, y fechas a la derecha.
-    </>
-  )
-}
-
-function ClassicViewHelpText() {
-  return (
-    <>
-      Mismos filtros que en Comparativa: tipo de fila, búsqueda (ID, ref., importe), clasificación y
-      fechas; las tres tablas muestran solo lo que cumple todos los criterios activos.
     </>
   )
 }
@@ -245,30 +251,21 @@ function LedgerViewHelpText() {
   )
 }
 
-function RubroViewHelpText() {
-  return (
-    <>
-      <p>
-        <strong>Mismo detalle en registro</strong> agrupa automáticamente cuando la descripción (o la
-        referencia si no hay descripción) es la misma en extracto y libro.{' '}
-        <strong>Por clasificación (rubro)</strong> agrupa por el rubro asignado a cada movimiento.
-      </p>
-      <p>
-        Si los textos no coinciden, usá la columna <strong>Comparar</strong>: cada clic en{' '}
-        <strong>Banco</strong> o <strong>Empresa</strong> agrega o quita ese grupo del panel de
-        comparación cruzada (podés elegir varios de cada lado). Ahí ves Σ y Δ, podés{' '}
-        <strong>clasificar</strong> todos los movimientos seleccionados con un solo rubro,
-        <strong> vincular</strong> pendientes 1:1 (clic en la fila de cada lado) o{' '}
-        <strong>conciliar grupo</strong> cuando hay varios de un lado y uno o más del otro (N:M).
-      </p>
-      <p>
-        Δ en la tabla = mismo grupo (misma fila). Cuadrado si |Δ| ≤ tolerancia de importe. En
-        movimientos ya emparejados, tocá <strong>par</strong> para ver el otro lado.
-      </p>
-    </>
+function LedgerKeyboardHelpText({ linkMode }: { linkMode: boolean }) {
+  return linkMode ? (
+    <p className="keyboard-hint-popover-body">
+      Tocá la <strong>fila</strong> del pendiente o pasá el mouse sobre una tabla: <kbd>↑</kbd>{' '}
+      <kbd>↓</kbd> recorren filas, <kbd>←</kbd> <kbd>→</kbd> cambian de tabla, <kbd>Espacio</kbd>{' '}
+      selecciona pendientes, <kbd>Enter</kbd> confirma el vínculo, <kbd>Esc</kbd> limpia la selección
+      (el foco queda en la tabla).
+    </p>
+  ) : (
+    <p className="keyboard-hint-popover-body">
+      Sobre una tabla: <kbd>↑</kbd> <kbd>↓</kbd> recorren filas; <kbd>←</kbd> <kbd>→</kbd> pasan al otro
+      lado.
+    </p>
   )
 }
-
 
 function ExecutiveSummaryGuide() {
   return (
@@ -896,20 +893,39 @@ function SubsectionTitleRow({
   help,
   helpAriaLabel,
   helpDialogLabel,
+  keyboardHelp,
+  keyboardHelpAriaLabel,
+  keyboardHelpDialogLabel,
 }: {
   children: React.ReactNode
   help?: React.ReactNode
   helpAriaLabel?: string
   helpDialogLabel?: string
+  keyboardHelp?: React.ReactNode
+  keyboardHelpAriaLabel?: string
+  keyboardHelpDialogLabel?: string
 }) {
   return (
     <div className="subsection-title-row">
       <h3 className="subsection-title">{children}</h3>
-      {help && (
-        <HelpPopoverButton ariaLabel={helpAriaLabel} dialogLabel={helpDialogLabel}>
-          {help}
-        </HelpPopoverButton>
-      )}
+      {help || keyboardHelp ? (
+        <div className="subsection-title-help">
+          {help ? (
+            <HelpPopoverButton ariaLabel={helpAriaLabel} dialogLabel={helpDialogLabel}>
+              {help}
+            </HelpPopoverButton>
+          ) : null}
+          {keyboardHelp ? (
+            <HelpPopoverButton
+              variant="keyboard"
+              ariaLabel={keyboardHelpAriaLabel ?? 'Atajos de teclado'}
+              dialogLabel={keyboardHelpDialogLabel ?? 'Atajos de teclado'}
+            >
+              {keyboardHelp}
+            </HelpPopoverButton>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -999,8 +1015,8 @@ function CompareFiltersBar({
               className="compare-search-input"
               value={searchValue}
               onChange={(ev) => onSearchChange(ev.target.value)}
-              placeholder="ID, referencia, descripción, importe…"
-              aria-label="Buscar por ID, referencia, descripción o importe"
+              placeholder="# fila, referencia, descripción, importe…"
+              aria-label="Buscar por número de fila, referencia, descripción o importe"
               autoComplete="off"
             />
             {hasSearch ? (
@@ -1149,37 +1165,6 @@ function buildComparisonRows(
       }),
     )
   return [...pairRows, ...groupRows, ...ub, ...uc]
-}
-
-/** Fecha usada para ordenar la fila en la vista completa (cronológica). */
-function rowTimelineSortDate(row: ComparisonRow): string {
-  if (row.kind === 'pair') {
-    return row.bank.txDate <= row.company.txDate ? row.bank.txDate : row.company.txDate
-  }
-  if (row.kind === 'group') {
-    const dates = [...row.banks.map((m) => m.txDate), ...row.companies.map((m) => m.txDate)].sort()
-    return dates[0] ?? ''
-  }
-  return row.m.txDate
-}
-
-function timelineKindOrder(row: ComparisonRow): number {
-  if (row.kind === 'pair' || row.kind === 'group') return 0
-  if (row.kind === 'unmatchedBank') return 1
-  return 2
-}
-
-/** Pares + pendientes en una sola lista ordenada por fecha (empate: par, luego banco, luego empresa). */
-function sortRowsChronologically(rows: ComparisonRow[]): ComparisonRow[] {
-  return [...rows].sort((a, b) => {
-    const da = rowTimelineSortDate(a)
-    const db = rowTimelineSortDate(b)
-    const byDate = da.localeCompare(db)
-    if (byDate !== 0) return byDate
-    const ko = timelineKindOrder(a) - timelineKindOrder(b)
-    if (ko !== 0) return ko
-    return a.key.localeCompare(b.key)
-  })
 }
 
 function rowClassForComparison(
@@ -1480,12 +1465,12 @@ function PendingDeferButton({ onClick }: { onClick: () => void }) {
   return (
     <button
       type="button"
-      className="comment-thread-btn defer-thread-btn"
+      className="defer-pending-btn"
       onClick={onClick}
       title="Diferir a próxima conciliación"
       aria-label="Diferir a próxima conciliación"
     >
-      <svg className="comment-thread-svg" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <svg className="defer-pending-btn-icon" viewBox="0 0 24 24" fill="none" aria-hidden>
         <rect
           x="3"
           y="5"
@@ -1720,6 +1705,7 @@ type PendingAttachmentSidePanelProps =
       sessionClosed: boolean
       onAfterChange: () => void
       showSideHeading: boolean
+      movementLabel?: string
     }
   | {
       kind: 'pair'
@@ -1829,7 +1815,7 @@ function PendingAttachmentSidePanel(props: PendingAttachmentSidePanelProps) {
       <div className={showSideHeading ? 'pair-thread-section' : undefined}>
         {showSideHeading && props.kind === 'movement' ? (
           <h4 className="pair-thread-heading">
-            {props.side === 'bank' ? 'Banco' : 'Empresa'} · ID {props.txId}
+            {props.movementLabel ?? (props.side === 'bank' ? 'Banco' : 'Empresa')}
           </h4>
         ) : null}
         <input
@@ -1923,12 +1909,14 @@ function PendingAttachmentSidePanel(props: PendingAttachmentSidePanelProps) {
 function PendingAttachmentsModal({
   sessionId,
   target,
+  detail,
   sessionClosed,
   onClose,
   onAfterChange,
 }: {
   sessionId: number
   target: PendingAttachmentTarget | null
+  detail: SessionDetail | null
   sessionClosed: boolean
   onClose: () => void
   onAfterChange: () => void
@@ -2018,8 +2006,6 @@ function PendingAttachmentsModal({
     )
   }
 
-  const sideLabel = target.side === 'bank' ? 'Banco' : 'Empresa'
-
   return (
     <div className="comment-modal-backdrop" role="presentation" onClick={onClose}>
       <div
@@ -2031,7 +2017,7 @@ function PendingAttachmentsModal({
       >
         <header className="comment-modal-head">
           <h3 id="attachment-modal-title">
-            Adjuntos · {sideLabel} · ID {target.txId}
+            Adjuntos · {movementModalLabel(detail, target.side, target.txId)}
           </h3>
           <button type="button" className="comment-modal-close" onClick={onClose} aria-label="Cerrar">
             ×
@@ -2065,6 +2051,7 @@ function PendingCommentSidePanel({
   sessionClosed,
   onAfterChange,
   showSideHeading,
+  movementLabel,
 }: {
   sessionId: number
   side: 'bank' | 'company'
@@ -2072,6 +2059,7 @@ function PendingCommentSidePanel({
   sessionClosed: boolean
   onAfterChange: () => void
   showSideHeading: boolean
+  movementLabel?: string
 }) {
   const [items, setItems] = useState<PendingCommentDto[]>([])
   const [loading, setLoading] = useState(false)
@@ -2162,9 +2150,7 @@ function PendingCommentSidePanel({
   return (
     <div className={showSideHeading ? 'pair-thread-section' : undefined}>
       {showSideHeading ? (
-        <h4 className="pair-thread-heading">
-          {sideLabel} · ID {txId}
-        </h4>
+        <h4 className="pair-thread-heading">{movementLabel ?? sideLabel}</h4>
       ) : null}
       <div ref={threadScrollRef} className="comment-thread-scroll" tabIndex={0}>
         {loading && <p className="msg subtle">Cargando…</p>}
@@ -2573,12 +2559,14 @@ function SessionActivityModal({
 function PendingCommentsModal({
   sessionId,
   target,
+  detail,
   sessionClosed,
   onClose,
   onAfterChange,
 }: {
   sessionId: number
   target: PendingThreadTarget | null
+  detail: SessionDetail | null
   sessionClosed: boolean
   onClose: () => void
   onAfterChange: () => void
@@ -2662,8 +2650,6 @@ function PendingCommentsModal({
     )
   }
 
-  const sideLabel = target.side === 'bank' ? 'Banco' : 'Empresa'
-
   return (
     <div className="comment-modal-backdrop" role="presentation" onClick={onClose}>
       <div
@@ -2675,7 +2661,7 @@ function PendingCommentsModal({
       >
         <header className="comment-modal-head">
           <h3 id="comment-modal-title">
-            Conversación · {sideLabel} · ID {target.txId}
+            Conversación · {movementModalLabel(detail, target.side, target.txId)}
           </h3>
           <button type="button" className="comment-modal-close" onClick={onClose} aria-label="Cerrar">
             ×
@@ -2844,28 +2830,12 @@ function PendingHintBadges({
   )
 }
 
-const COMPARE_TABLE_COL_COUNT = 14
-
-/** Mide 14 columnas lógicas a partir de la primera fila del tbody (respeta colSpan). */
-function measureCompareTableColumnWidths(table: HTMLTableElement): number[] | null {
-  for (const tr of table.querySelectorAll('tbody tr')) {
-    const widths: number[] = []
-    for (const td of tr.querySelectorAll(':scope > td')) {
-      const cell = td as HTMLTableCellElement
-      const span = cell.colSpan > 0 ? cell.colSpan : 1
-      const wEach = cell.getBoundingClientRect().width / span
-      for (let i = 0; i < span; i += 1) {
-        widths.push(Math.round(wEach * 10) / 10)
-      }
-    }
-    if (widths.length === COMPARE_TABLE_COL_COUNT) return widths
-  }
-  return null
-}
-
 function ComparisonTable({
   rows,
   allRowsCount,
+  baselineRowNumbers,
+  lockedColWidths,
+  onLockedColWidthsChange,
   selectedId,
   sessionId,
   canShareInChat,
@@ -2890,6 +2860,11 @@ function ComparisonTable({
   rows: ComparisonRow[]
   /** Total sin filtrar; si es 0 la sesión está vacía. */
   allRowsCount: number
+  /** Número de fila estable (#) respecto a estado/fechas (no cambia al buscar). */
+  baselineRowNumbers?: Map<string, number>
+  /** Anchos de columna (persistidos en el padre para sobrevivir cambio de vista). */
+  lockedColWidths: number[] | null
+  onLockedColWidthsChange: (widths: number[] | null) => void
   selectedId: number | null
   sessionId: number | null
   canShareInChat: boolean
@@ -2923,35 +2898,75 @@ function ComparisonTable({
   onTogglePending?: (side: 'bank' | 'company', txId: number) => void
 }) {
   const tableRef = useRef<HTMLTableElement>(null)
-  const [lockedColWidths, setLockedColWidths] = useState<number[] | null>(null)
   const [expandedGroupSides, setExpandedGroupSides] = useState<Set<string>>(() => new Set())
+  const resizeCleanupRef = useRef<(() => void) | null>(null)
 
   useEffect(() => {
-    setLockedColWidths(null)
-  }, [sessionId, allRowsCount])
+    return () => {
+      resizeCleanupRef.current?.()
+      document.body.classList.remove('compare-col-resize-active')
+    }
+  }, [])
+
+  const handleColumnResizeStart = useCallback(
+    (leftCol: number, ev: React.PointerEvent<HTMLSpanElement>) => {
+      if (lockedColWidths == null) return
+      const target = ev.currentTarget
+      target.setPointerCapture(ev.pointerId)
+      const startWidths = lockedColWidths
+      resizeCleanupRef.current?.()
+      resizeCleanupRef.current = beginCompareColumnResize(
+        startWidths,
+        leftCol,
+        ev.clientX,
+        (next) => onLockedColWidthsChange(next),
+        (finalWidths) => {
+          if (sessionId != null) saveCompareColumnWidths(sessionId, finalWidths)
+        },
+      )
+    },
+    [lockedColWidths, onLockedColWidthsChange, sessionId],
+  )
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined
     const onResize = () => {
       if (timer) clearTimeout(timer)
-      timer = setTimeout(() => setLockedColWidths(null), 200)
+      timer = setTimeout(() => {
+        if (sessionId != null) {
+          const saved = loadCompareColumnWidths(sessionId)
+          if (saved) {
+            onLockedColWidthsChange(saved)
+            return
+          }
+        }
+        onLockedColWidthsChange(null)
+      }, 200)
     }
     window.addEventListener('resize', onResize)
     return () => {
       window.removeEventListener('resize', onResize)
       if (timer) clearTimeout(timer)
     }
-  }, [])
+  }, [onLockedColWidthsChange, sessionId])
 
   const canCaptureColumnLayout = rows.length > 0 && rows.length === allRowsCount
 
   useLayoutEffect(() => {
-    if (lockedColWidths != null || !canCaptureColumnLayout) return
+    if (lockedColWidths != null) return
+    if (sessionId != null) {
+      const saved = loadCompareColumnWidths(sessionId)
+      if (saved) {
+        onLockedColWidthsChange(saved)
+        return
+      }
+    }
+    if (!canCaptureColumnLayout) return
     const table = tableRef.current
     if (!table) return
     const widths = measureCompareTableColumnWidths(table)
-    if (widths) setLockedColWidths(widths)
-  }, [canCaptureColumnLayout, lockedColWidths, rows])
+    if (widths) onLockedColWidthsChange(widths)
+  }, [canCaptureColumnLayout, lockedColWidths, onLockedColWidthsChange, rows, sessionId])
 
   useEffect(() => {
     const validGroupKeys = new Set(rows.filter((r) => r.kind === 'group').map((r) => r.key))
@@ -2979,12 +2994,32 @@ function ComparisonTable({
     })
   }
 
+  const lockedTableWidthPx = useMemo(
+    () => (lockedColWidths != null ? compareTableTotalWidth(lockedColWidths) : null),
+    [lockedColWidths],
+  )
+
   return (
     <div className="table-wrap compare-table-wrap table-wrap--scrollY">
-      <table
-        ref={tableRef}
-        className={`data-table compare-table${lockedColWidths ? ' compare-table--cols-locked' : ''}`}
+      <div
+        className="compare-table-inner"
+        style={
+          lockedTableWidthPx != null
+            ? { width: `${lockedTableWidthPx}px`, minWidth: '100%' }
+            : undefined
+        }
       >
+        {lockedColWidths ? (
+          <CompareTableColumnResizeRails
+            widths={lockedColWidths}
+            onResizeStart={handleColumnResizeStart}
+          />
+        ) : null}
+        <table
+          ref={tableRef}
+          className={`data-table compare-table${lockedColWidths ? ' compare-table--cols-locked' : ''}`}
+          style={lockedTableWidthPx != null ? { width: '100%' } : undefined}
+        >
         {lockedColWidths ? (
           <colgroup>
             {lockedColWidths.map((w, i) => (
@@ -3000,10 +3035,10 @@ function ComparisonTable({
             <th rowSpan={2} className="compare-th-tipo">
               Estado
             </th>
-            <th colSpan={4} className="compare-th-group compare-th-group--bank">
+            <th colSpan={3} className="compare-th-group compare-th-group--bank">
               Banco
             </th>
-            <th colSpan={4} className="compare-th-group">
+            <th colSpan={3} className="compare-th-group">
               Empresa
             </th>
             <th rowSpan={2} className="compare-th-delta" title="Diferencia de importe (empresa − banco)">
@@ -3018,20 +3053,18 @@ function ComparisonTable({
             <th rowSpan={2} className="compare-th-unlink" scope="col" aria-label="Desvincular par o grupo"></th>
           </tr>
           <tr>
-            <th>ID</th>
             <th>Fecha</th>
             <th>Importe</th>
             <th className="compare-th-split-edge">Ref. / desc.</th>
-            <th>ID</th>
             <th>Fecha</th>
             <th>Importe</th>
-            <th>Ref. / desc.</th>
+            <th className="compare-th-split-edge">Ref. / desc.</th>
           </tr>
         </thead>
         <tbody>
           {rows.length === 0 ? (
             <tr>
-              <td colSpan={14} className="compare-empty">
+              <td colSpan={12} className="compare-empty">
                 {allRowsCount === 0
                   ? 'No hay movimientos en esta sesión.'
                   : 'No hay filas que coincidan. Probá «Todos», ampliá fechas, vaciá el buscador o el filtro de clasificación, o cambiá el texto.'}
@@ -3039,10 +3072,11 @@ function ComparisonTable({
             </tr>
           ) : (
             rows.map((row, idx) => {
+              const displayRowNum = baselineRowNumbers?.get(row.key) ?? idx + 1
               const cls = rowClassForComparison(row, sessionAmountTolerance)
               const shareRef =
                 canShareInChat && sessionId != null
-                  ? buildShareRefFromComparisonRow(sessionId, row, idx + 1)
+                  ? buildShareRefFromComparisonRow(sessionId, row, displayRowNum)
                   : null
               if (row.kind === 'pair') {
                 const { pair, bank, company } = row
@@ -3052,7 +3086,7 @@ function ComparisonTable({
                 const estado = pairEstadoMeta(pair, bank, company, sessionAmountTolerance)
                 return (
                   <tr key={row.key} data-row-key={row.key} className={cls}>
-                    <td className="rownum-td">{idx + 1}</td>
+                    <td className="rownum-td">{displayRowNum}</td>
                     <td className="compare-td-tipo">
                       <CompareEstadoChips>
                         <CompareEstadoChip
@@ -3063,18 +3097,16 @@ function ComparisonTable({
                         <DeferredOriginChips movements={[bank, company]} />
                       </CompareEstadoChips>
                     </td>
-                    <td>{bank.id}</td>
                     <td className="cell-date-nowrap">{formatDisplayDate(bank.txDate)}</td>
                     <td>{bank.amount}</td>
                     <td className="compare-td-split-edge cell-desc">
                       {[bank.reference, bank.description].filter(Boolean).join(' · ') || '—'}
                     </td>
-                    <td>{company.id}</td>
                     <td className="cell-date-nowrap">
                       {formatDisplayDate(company.txDate)}
                     </td>
                     <td>{company.amount}</td>
-                    <td className="cell-desc">
+                    <td className="compare-td-split-edge cell-desc">
                       {[company.reference, company.description].filter(Boolean).join(' · ') ||
                         '—'}
                     </td>
@@ -3120,6 +3152,7 @@ function ComparisonTable({
                     <td className="compare-td-unlink">
                       {selectedId != null && !sessionClosed && !classificationReadOnly ? (
                         <UnlinkPairButton
+                          variant="icon"
                           matchSource={pair.matchSource === 'MANUAL' ? 'MANUAL' : 'AUTO'}
                           onClick={() =>
                             onUnlinkPair(
@@ -3139,7 +3172,7 @@ function ComparisonTable({
                   <CompareGroupTableRows
                     key={row.key}
                     row={row}
-                    rowNum={idx + 1}
+                    rowNum={displayRowNum}
                     rowClass={cls}
                     expandedBank={expandedGroupSides.has(compareGroupSideKey(row.key, 'bank'))}
                     expandedCompany={expandedGroupSides.has(compareGroupSideKey(row.key, 'company'))}
@@ -3193,7 +3226,7 @@ function ComparisonTable({
                       .filter(Boolean)
                       .join(' ')}
                   >
-                    <td className="rownum-td">{idx + 1}</td>
+                    <td className="rownum-td">{displayRowNum}</td>
                     <td className="compare-td-tipo compare-td-tipo--stack">
                       <CompareEstadoChips>
                         <CompareEstadoChip
@@ -3222,14 +3255,6 @@ function ComparisonTable({
                       txId={m.id}
                       linkMode={linkMode}
                       onTogglePending={onTogglePending}
-                    >
-                      {m.id}
-                    </CompareLinkPickCell>
-                    <CompareLinkPickCell
-                      side="bank"
-                      txId={m.id}
-                      linkMode={linkMode}
-                      onTogglePending={onTogglePending}
                       className="cell-date-nowrap"
                     >
                       {formatDisplayDate(m.txDate)}
@@ -3251,11 +3276,11 @@ function ComparisonTable({
                     >
                       {[m.reference, m.description].filter(Boolean).join(' · ') || '—'}
                     </CompareLinkPickCell>
-                    <td colSpan={4} className="compare-td-split-start compare-muted">
+                    <td colSpan={3} className="compare-td-split-start compare-muted">
                       —
                     </td>
                     <td className="compare-muted">—</td>
-                    <td>
+                    <td className="compare-td-clasif-pair">
                       <ClassificationCombo
                         value={m.pendingClassification}
                         suggestions={classificationSuggestions}
@@ -3302,7 +3327,7 @@ function ComparisonTable({
                     .filter(Boolean)
                     .join(' ')}
                 >
-                  <td className="rownum-td">{idx + 1}</td>
+                  <td className="rownum-td">{displayRowNum}</td>
                   <td className="compare-td-tipo compare-td-tipo--stack">
                     <CompareEstadoChips>
                       <CompareEstadoChip
@@ -3326,17 +3351,9 @@ function ComparisonTable({
                       <DeferredOriginChips movements={[m]} />
                     </CompareEstadoChips>
                   </td>
-                  <td colSpan={4} className="compare-td-split-edge compare-muted">
+                  <td colSpan={3} className="compare-td-split-edge compare-muted">
                     —
                   </td>
-                  <CompareLinkPickCell
-                    side="company"
-                    txId={m.id}
-                    linkMode={linkMode}
-                    onTogglePending={onTogglePending}
-                  >
-                    {m.id}
-                  </CompareLinkPickCell>
                   <CompareLinkPickCell
                     side="company"
                     txId={m.id}
@@ -3359,12 +3376,12 @@ function ComparisonTable({
                     txId={m.id}
                     linkMode={linkMode}
                     onTogglePending={onTogglePending}
-                    className="cell-desc"
+                    className="compare-td-split-edge cell-desc"
                   >
                     {[m.reference, m.description].filter(Boolean).join(' · ') || '—'}
                   </CompareLinkPickCell>
                   <td className="compare-muted">—</td>
-                  <td>
+                  <td className="compare-td-clasif-pair">
                     <ClassificationCombo
                       value={m.pendingClassification}
                       suggestions={classificationSuggestions}
@@ -3404,145 +3421,8 @@ function ComparisonTable({
           )}
         </tbody>
       </table>
-    </div>
-  )
-}
-
-function CompleteViewLegendStatic() {
-  return (
-    <div className="complete-legend-readonly" aria-label="Referencia de colores">
-      <span className="complete-legend-item">
-        <span className="compare-swatch compare-swatch--auto" aria-hidden /> Conciliado
-      </span>
-      <span className="complete-legend-item">
-        <span className="compare-swatch compare-swatch--manual" aria-hidden /> Conciliado manual
-      </span>
-      <span className="complete-legend-item">
-        <span className="compare-swatch compare-swatch--amount-gap" aria-hidden /> Δ importe / ajuste
-      </span>
-      <span className="complete-legend-item">
-        <span className="compare-swatch compare-swatch--opp-sign" aria-hidden /> Signo incorrecto
-      </span>
-      <span className="complete-legend-item">
-        <span className="compare-swatch compare-swatch--pend-bank" aria-hidden /> Pendiente banco
-      </span>
-      <span className="complete-legend-item">
-        <span className="compare-swatch compare-swatch--pend-company" aria-hidden /> Pendiente empresa
-      </span>
-      <span className="complete-legend-item">
-        <span className="compare-swatch compare-swatch--fuzzy" aria-hidden /> Posible match
-      </span>
-      <span className="complete-legend-item">
-        <span className="compare-swatch compare-swatch--duplicate" aria-hidden /> Duplicado
-      </span>
-      <span className="complete-legend-item">
-        <span className="compare-swatch compare-swatch--deferred-in" aria-hidden /> Incorporado dif.
-      </span>
-    </div>
-  )
-}
-
-function MovimientosTable({
-  title,
-  rows,
-  classificationSuggestions,
-  onClassificationChange,
-  classificationLocked,
-  onOpenPendingComments,
-  onOpenPendingAttachments,
-}: {
-  title: string
-  rows: MovimientoDto[]
-  classificationSuggestions: readonly string[]
-  /** Pendientes: columna «Clasif.» con el mismo criterio que en comparativa / vista completa. */
-  onClassificationChange?: (txId: number, classification: string) => void
-  /** Sesión cerrada o rol solo consulta: selector deshabilitado. */
-  classificationLocked?: boolean
-  /** Conversación archivada en el pendiente. */
-  onOpenPendingComments?: (txId: number) => void
-  onOpenPendingAttachments?: (txId: number) => void
-}) {
-  if (rows.length === 0) {
-    return (
-      <p className="msg subtle">
-        {title}: ninguno.
-      </p>
-    )
-  }
-  const showClassif = onClassificationChange != null
-  const showNotes = onOpenPendingComments != null
-  const showAttach = onOpenPendingAttachments != null
-  return (
-    <>
-      <h3 className="subsection-title">
-        {title} ({rows.length})
-      </h3>
-      <div className="table-wrap table-wrap--scrollY">
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th className="rownum-th" aria-label="Número de fila">
-                #
-              </th>
-              <th>ID</th>
-              <th>Fecha</th>
-              <th>Importe</th>
-              <th>Referencia</th>
-              <th>Descripción</th>
-              {showClassif && <th className="mov-clasif-th">Clasif.</th>}
-              {showNotes && (
-                <th className="mov-notes-th" scope="col" aria-label="Comentarios del pendiente">
-                  <ConversationBubbleIcon className="comment-thread-svg comment-thread-svg--th" />
-                </th>
-              )}
-              {showAttach && (
-                <th className="mov-notes-th" scope="col" aria-label="Adjuntos">
-                  <PaperclipIcon className="comment-thread-svg comment-thread-svg--th" />
-                </th>
-              )}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((m, idx) => (
-              <tr key={m.id}>
-                <td className="rownum-td">{idx + 1}</td>
-                <td>{m.id}</td>
-                <td className="cell-date-nowrap">{formatDisplayDate(m.txDate)}</td>
-                <td>{m.amount}</td>
-                <td className="cell-desc">{m.reference ?? '—'}</td>
-                <td className="cell-desc">{m.description ?? '—'}</td>
-                {showClassif && onClassificationChange && (
-                  <td className="mov-clasif-td">
-                    <ClassificationCombo
-                      value={m.pendingClassification}
-                      suggestions={classificationSuggestions}
-                      disabled={classificationLocked}
-                      onCommit={(v) => onClassificationChange(m.id, v)}
-                    />
-                  </td>
-                )}
-                {showNotes && onOpenPendingComments && (
-                  <td className="mov-notes-td">
-                    <PendingConversationButton
-                      commentCount={m.commentCount}
-                      onClick={() => onOpenPendingComments(m.id)}
-                    />
-                  </td>
-                )}
-                {showAttach && onOpenPendingAttachments && (
-                  <td className="mov-notes-td">
-                    <PendingAttachmentButton
-                      attachmentCount={m.attachmentCount}
-                      onClick={() => onOpenPendingAttachments(m.id)}
-                    />
-                  </td>
-                )}
-              </tr>
-            ))}
-          </tbody>
-        </table>
       </div>
-    </>
+    </div>
   )
 }
 
@@ -3606,9 +3486,8 @@ export default function ConciliacionPage() {
   const [activityError, setActivityError] = useState<string | null>(null)
   const [balancesModalOpen, setBalancesModalOpen] = useState(false)
 
-  const [detailLayout, setDetailLayout] = useState<
-    'classic' | 'compare' | 'complete' | 'rubro' | 'ledger'
-  >('compare')
+  const [detailLayout, setDetailLayout] = useState<'compare' | 'rubro' | 'ledger'>('compare')
+  const [compareTableColWidths, setCompareTableColWidths] = useState<number[] | null>(null)
   const [compareFilter, setCompareFilter] = useState<CompareFilterKind>('all')
   const [compareDateFrom, setCompareDateFrom] = useState('')
   const [compareDateTo, setCompareDateTo] = useState('')
@@ -3618,6 +3497,8 @@ export default function ConciliacionPage() {
   const [commentTarget, setCommentTarget] = useState<PendingThreadTarget | null>(null)
   const [attachmentTarget, setAttachmentTarget] = useState<PendingAttachmentTarget | null>(null)
   const [comparePairLinkOpen, setComparePairLinkOpen] = useState(false)
+  const [compareClassifyLoading, setCompareClassifyLoading] = useState(false)
+  const [compareClassifyError, setCompareClassifyError] = useState<string | null>(null)
   const [counterpartInspect, setCounterpartInspect] = useState<CounterpartInspectRequest | null>(
     null,
   )
@@ -3664,6 +3545,14 @@ export default function ConciliacionPage() {
     [detail, effectiveSessionAmountTolerance],
   )
 
+  useEffect(() => {
+    if (selectedId == null) {
+      setCompareTableColWidths(null)
+      return
+    }
+    setCompareTableColWidths(loadCompareColumnWidths(selectedId))
+  }, [selectedId, comparisonRows.length])
+
   const compareCounts = useMemo(
     () => compareFilterCounts(comparisonRows, effectiveSessionAmountTolerance),
     [comparisonRows, effectiveSessionAmountTolerance],
@@ -3685,62 +3574,30 @@ export default function ConciliacionPage() {
     ],
   )
 
+  const comparisonRowNumbers = useMemo(() => {
+    const map = new Map<string, number>()
+    rowsAfterLegendAndDate.forEach((r, i) => map.set(r.key, i + 1))
+    return map
+  }, [rowsAfterLegendAndDate])
+
   const filteredComparisonRows = useMemo(() => {
     const filtered = rowsAfterLegendAndDate.filter(
       (r) =>
-        rowMatchesSearch(r, compareSearchQuery) &&
+        rowMatchesSearch(r, compareSearchQuery, comparisonRowNumbers.get(r.key)) &&
         rowMatchesClassification(r, compareClassificationFilter),
     )
     const q = compareSearchQuery.trim()
     if (q === '') return filtered
-    return [...filtered].sort((a, b) => {
-      const pa = searchMatchPriority(a, q) ?? 99
-      const pb = searchMatchPriority(b, q) ?? 99
-      return pa - pb
-    })
-  }, [rowsAfterLegendAndDate, compareSearchQuery, compareClassificationFilter])
-
-  const filteredChronologicalRows = useMemo(() => {
-    const q = compareSearchQuery.trim()
-    if (q === '') return sortRowsChronologically(filteredComparisonRows)
-    return [...filteredComparisonRows].sort((a, b) => {
-      const pa = searchMatchPriority(a, q) ?? 99
-      const pb = searchMatchPriority(b, q) ?? 99
-      if (pa !== pb) return pa - pb
-      const da = rowTimelineSortDate(a)
-      const db = rowTimelineSortDate(b)
-      const byDate = da.localeCompare(db)
-      if (byDate !== 0) return byDate
-      const ko = timelineKindOrder(a) - timelineKindOrder(b)
-      if (ko !== 0) return ko
-      return a.key.localeCompare(b.key)
-    })
-  }, [filteredComparisonRows, compareSearchQuery])
-
-  /** Misma lógica que Comparativa/Completa: estado + rango de fechas → tablas clásicas. */
-  const classicFilteredPairRows = useMemo(
-    () =>
-      filteredComparisonRows.filter(
-        (r): r is Extract<ComparisonRow, { kind: 'pair' }> => r.kind === 'pair',
+    return [...filtered].sort((a, b) =>
+      compareSearchRowOrder(
+        a,
+        b,
+        q,
+        comparisonRowNumbers.get(a.key),
+        comparisonRowNumbers.get(b.key),
       ),
-    [filteredComparisonRows],
-  )
-
-  const classicFilteredUnmatchedBank = useMemo(
-    () =>
-      filteredComparisonRows
-        .filter((r) => r.kind === 'unmatchedBank')
-        .map((r) => r.m),
-    [filteredComparisonRows],
-  )
-
-  const classicFilteredUnmatchedCompany = useMemo(
-    () =>
-      filteredComparisonRows
-        .filter((r) => r.kind === 'unmatchedCompany')
-        .map((r) => r.m),
-    [filteredComparisonRows],
-  )
+    )
+  }, [rowsAfterLegendAndDate, compareSearchQuery, compareClassificationFilter, comparisonRowNumbers])
 
   const classificationSuggestions = useMemo(() => {
     if (!detail) return []
@@ -3763,13 +3620,6 @@ export default function ConciliacionPage() {
     }
     return Array.from(s).sort((a, b) => a.localeCompare(b, 'es'))
   }, [detail])
-
-  const compareRowFilterActive =
-    compareFilter !== 'all' ||
-    compareDateFrom !== '' ||
-    compareDateTo !== '' ||
-    compareSearchQuery.trim() !== '' ||
-    compareClassificationFilter.trim() !== ''
 
   const detailMatchesSelection =
     selectedId != null && detail != null && detail.session.id === selectedId
@@ -3834,8 +3684,13 @@ export default function ConciliacionPage() {
     if (detailLayout !== 'compare') {
       clearCompareLinkSelection()
       setComparePairLinkOpen(false)
+      setCompareClassifyError(null)
     }
   }, [detailLayout, clearCompareLinkSelection])
+
+  useEffect(() => {
+    if (!compareHasSelection) setCompareClassifyError(null)
+  }, [compareHasSelection])
 
   const compareLinkScrollRef = useRef<{ win: number; table: number } | null>(null)
 
@@ -4532,6 +4387,50 @@ export default function ConciliacionPage() {
       requestAnimationFrame(() => window.scrollTo({ top: y }))
     } catch (e) {
       setManualError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  async function handleCompareSelectionBulkClassify(classification: string) {
+    if (selectedId == null) return
+    setCompareClassifyLoading(true)
+    setCompareClassifyError(null)
+    const y = window.scrollY
+    try {
+      const targets = collectSelectionClassificationTargets(
+        compareSelectedBank,
+        compareSelectedCompany,
+      )
+      const payload = classification === '' ? null : classification
+      for (const txId of targets.bankPendingIds) {
+        const r = await apiFetch(
+          `/api/v1/conciliacion/sessions/${selectedId}/pending/banco/${txId}/clasificacion`,
+          {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ classification: payload }),
+          },
+        )
+        if (!r.ok) throw new Error(await parseError(r))
+      }
+      for (const txId of targets.companyPendingIds) {
+        const r = await apiFetch(
+          `/api/v1/conciliacion/sessions/${selectedId}/pending/empresa/${txId}/clasificacion`,
+          {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ classification: payload }),
+          },
+        )
+        if (!r.ok) throw new Error(await parseError(r))
+      }
+      await loadDetail(selectedId, { soft: true })
+      requestAnimationFrame(() => window.scrollTo({ top: y }))
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      setCompareClassifyError(msg)
+      setManualError(msg)
+    } finally {
+      setCompareClassifyLoading(false)
     }
   }
 
@@ -5446,109 +5345,101 @@ export default function ConciliacionPage() {
                 onOpenBalances={() => setBalancesModalOpen(true)}
               />
 
-              <div className="detail-view-toggle-wrap">
-                <span className="detail-view-toggle-label">Vistas</span>
-                <div className="detail-view-toggle" role="tablist" aria-label="Vistas de detalle">
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={detailLayout === 'compare'}
-                    className="detail-view-tab detail-view-tab--compare"
-                    onClick={() => setDetailLayout('compare')}
-                  >
-                    Comparativa
-                  </button>
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={detailLayout === 'rubro'}
-                    className="detail-view-tab detail-view-tab--rubro"
-                    onClick={() => setDetailLayout('rubro')}
-                  >
-                    Por rubro
-                  </button>
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={detailLayout === 'ledger'}
-                    className="detail-view-tab detail-view-tab--ledger"
-                    onClick={() => setDetailLayout('ledger')}
-                  >
-                    Por archivo
-                  </button>
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={detailLayout === 'complete'}
-                    className="detail-view-tab detail-view-tab--complete"
-                    onClick={() => setDetailLayout('complete')}
-                  >
-                    Completa
-                  </button>
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={detailLayout === 'classic'}
-                    className="detail-view-tab detail-view-tab--classic"
-                    onClick={() => setDetailLayout('classic')}
-                  >
-                    Tablas clásicas
-                  </button>
+              <div
+                className={[
+                  'detail-view-toggle-wrap',
+                  detailLayout === 'compare' ? 'detail-view-toggle-wrap--compare' : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
+              >
+                <div className="detail-view-toggle-wrap__head">
+                  <span className="detail-view-toggle-label">Vistas</span>
+                  <div className="detail-view-toggle" role="tablist" aria-label="Vistas de detalle">
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={detailLayout === 'compare'}
+                      className="detail-view-tab detail-view-tab--compare"
+                      onClick={() => setDetailLayout('compare')}
+                    >
+                      Filtros
+                    </button>
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={detailLayout === 'rubro'}
+                      className="detail-view-tab detail-view-tab--rubro"
+                      onClick={() => setDetailLayout('rubro')}
+                    >
+                      Grupos
+                    </button>
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={detailLayout === 'ledger'}
+                      className="detail-view-tab detail-view-tab--ledger"
+                      onClick={() => setDetailLayout('ledger')}
+                    >
+                      Por archivo
+                    </button>
+                  </div>
                 </div>
+
+                {detailLayout === 'compare' ? (
+                  <div className="detail-view-compare-filters" role="group" aria-label="Filtros comparativa">
+                    <ComparisonLegend
+                      filter={compareFilter}
+                      onFilter={setCompareFilter}
+                      counts={compareCounts}
+                    />
+                    <CompareFiltersBar
+                      searchValue={compareSearchQuery}
+                      onSearchChange={setCompareSearchQuery}
+                      onSearchClear={() => setCompareSearchQuery('')}
+                      classificationValue={compareClassificationFilter}
+                      classificationOptions={classificationSuggestions}
+                      onClassificationChange={setCompareClassificationFilter}
+                      dateFrom={compareDateFrom}
+                      dateTo={compareDateTo}
+                      onDateFromChange={setCompareDateFrom}
+                      onDateToChange={setCompareDateTo}
+                      onClearDates={() => {
+                        setCompareDateFrom('')
+                        setCompareDateTo('')
+                      }}
+                      help={
+                        <CompareViewHelpText
+                          effectiveSessionAmountTolerance={effectiveSessionAmountTolerance}
+                        />
+                      }
+                      keyboardHelp={
+                        reconcileLocked ? undefined : (
+                          <p className="keyboard-hint-popover-body">
+                            Clic en los datos de <strong>banco</strong> o <strong>empresa</strong> (fecha,
+                            importe, descripción) o en el chip <strong>PB</strong>/<strong>PE</strong>{' '}
+                            para seleccionar pendientes. Otro clic quita la selección. Con ambos lados
+                            elegidos, <kbd>Enter</kbd> abre la confirmación (1:1 o grupo N:M); en el modal
+                            1:1, <kbd>Enter</kbd> vincula.
+                          </p>
+                        )
+                      }
+                    />
+                  </div>
+                ) : null}
               </div>
 
               {detailLayout === 'compare' ? (
                 <>
-                  <h3 className="subsection-title">
-                    Filtros (
-                    {compareRowFilterActive
-                      ? `${filteredComparisonRows.length} de ${comparisonRows.length}`
-                      : `${comparisonRows.length} filas`}
-                    )
-                  </h3>
-                  <ComparisonLegend
-                    filter={compareFilter}
-                    onFilter={setCompareFilter}
-                    counts={compareCounts}
-                  />
-                  <CompareFiltersBar
-                    searchValue={compareSearchQuery}
-                    onSearchChange={setCompareSearchQuery}
-                    onSearchClear={() => setCompareSearchQuery('')}
-                    classificationValue={compareClassificationFilter}
-                    classificationOptions={classificationSuggestions}
-                    onClassificationChange={setCompareClassificationFilter}
-                    dateFrom={compareDateFrom}
-                    dateTo={compareDateTo}
-                    onDateFromChange={setCompareDateFrom}
-                    onDateToChange={setCompareDateTo}
-                    onClearDates={() => {
-                      setCompareDateFrom('')
-                      setCompareDateTo('')
-                    }}
-                    help={
-                      <CompareViewHelpText
-                        effectiveSessionAmountTolerance={effectiveSessionAmountTolerance}
-                      />
-                    }
-                    keyboardHelp={
-                      reconcileLocked ? undefined : (
-                        <p className="keyboard-hint-popover-body">
-                          Clic en los datos de <strong>banco</strong> o <strong>empresa</strong> (ID,
-                          fecha, importe, descripción) o en el chip <strong>PB</strong>/<strong>PE</strong>{' '}
-                          para seleccionar pendientes. Otro clic quita la selección. Con ambos lados
-                          elegidos, <kbd>Enter</kbd> abre la confirmación (1:1 o grupo N:M); en el modal
-                          1:1, <kbd>Enter</kbd> vincula.
-                        </p>
-                      )
-                    }
-                  />
                   {reconcileLocked ? (
                     <p className="ledger-view-readonly-hint">Sesión cerrada: solo consulta.</p>
                   ) : null}
                   <ComparisonTable
                     rows={filteredComparisonRows}
                     allRowsCount={comparisonRows.length}
+                    baselineRowNumbers={comparisonRowNumbers}
+                    lockedColWidths={compareTableColWidths}
+                    onLockedColWidthsChange={setCompareTableColWidths}
                     selectedId={selectedId}
                     sessionId={selectedId}
                     canShareInChat={canShareInChat}
@@ -5595,6 +5486,13 @@ export default function ConciliacionPage() {
                       sessionAmountTolerance={effectiveSessionAmountTolerance}
                       enterHint
                       showSelectionTables
+                      classificationReadOnly={classificationReadOnly}
+                      classificationSuggestions={classificationSuggestions}
+                      classifyLoading={compareClassifyLoading}
+                      classifyError={compareClassifyError}
+                      onBulkClassify={(classification) =>
+                        handleCompareSelectionBulkClassify(classification)
+                      }
                       onClear={clearCompareLinkSelection}
                       onCreateGroup={
                         reconcileLocked
@@ -5609,14 +5507,60 @@ export default function ConciliacionPage() {
                 </>
               ) : detailLayout === 'rubro' ? (
                 <>
-                  <SubsectionTitleRow
-                    help={<RubroViewHelpText />}
-                    helpAriaLabel="Ayuda sobre la vista por rubro"
-                    helpDialogLabel="Ayuda de la vista por rubro"
-                  >
-                    Vista por rubro
-                  </SubsectionTitleRow>
                   <RubroGroupsView
+                    detail={detail}
+                    sessionAmountTolerance={effectiveSessionAmountTolerance}
+                    reconcileLocked={reconcileLocked}
+                    manualLinkLoading={manualLoading}
+                    manualLinkError={manualError}
+                    classificationReadOnly={classificationReadOnly}
+                    classificationSuggestions={classificationSuggestions}
+                    onSetClassification={(side, txId, c) => void handleSetClassification(side, txId, c)}
+                    onSetPairClassification={(pairId, c) => void handleSetPairClassification(pairId, c)}
+                    onSetGroupClassification={(groupId, c) =>
+                      void handleSetGroupClassification(groupId, c)
+                    }
+                    onManualPair={
+                      reconcileLocked
+                        ? undefined
+                        : (bankId, companyId) => void handleManualPairIds(bankId, companyId)
+                    }
+                    onCreateGroup={
+                      reconcileLocked ? undefined : (bankIds, companyIds) => handleCreateGroup(bankIds, companyIds)
+                    }
+                    onScrollToComparisonRow={(rowKey) => {
+                      setDetailLayout('compare')
+                      requestAnimationFrame(() => scrollToComparisonRow(rowKey))
+                    }}
+                    onUnlinkPair={
+                      reconcileLocked || classificationReadOnly
+                        ? undefined
+                        : (pairId, matchSource) => handleUnlinkPair(pairId, matchSource)
+                    }
+                    onUnlinkGroup={
+                      reconcileLocked || classificationReadOnly
+                        ? undefined
+                        : (groupId) => void handleUnlinkGroup(groupId)
+                    }
+                  />
+                </>
+              ) : detailLayout === 'ledger' ? (
+                <>
+                  <SubsectionTitleRow
+                    help={<LedgerViewHelpText />}
+                    helpAriaLabel="Ayuda sobre la vista por archivo"
+                    helpDialogLabel="Ayuda de la vista por archivo"
+                    keyboardHelp={
+                      detail.bankTransactions.length > 0 || detail.companyTransactions.length > 0 ? (
+                        <LedgerKeyboardHelpText linkMode={!reconcileLocked} />
+                      ) : undefined
+                    }
+                    keyboardHelpAriaLabel="Atajos de teclado en vista por archivo"
+                    keyboardHelpDialogLabel="Atajos — vista por archivo"
+                  >
+                    Vista por archivo
+                  </SubsectionTitleRow>
+                  <FullLedgerView
                     detail={detail}
                     sessionAmountTolerance={effectiveSessionAmountTolerance}
                     reconcileLocked={reconcileLocked}
@@ -5650,257 +5594,7 @@ export default function ConciliacionPage() {
                     }
                   />
                 </>
-              ) : detailLayout === 'ledger' ? (
-                <>
-                  <SubsectionTitleRow
-                    help={<LedgerViewHelpText />}
-                    helpAriaLabel="Ayuda sobre la vista por archivo"
-                    helpDialogLabel="Ayuda de la vista por archivo"
-                  >
-                    Vista por archivo
-                  </SubsectionTitleRow>
-                  <FullLedgerView
-                    detail={detail}
-                    sessionAmountTolerance={effectiveSessionAmountTolerance}
-                    reconcileLocked={reconcileLocked}
-                    manualLinkLoading={manualLoading}
-                    manualLinkError={manualError}
-                    onManualPair={
-                      reconcileLocked
-                        ? undefined
-                        : (bankId, companyId) => void handleManualPairIds(bankId, companyId)
-                    }
-                    onCreateGroup={
-                      reconcileLocked ? undefined : (bankIds, companyIds) => handleCreateGroup(bankIds, companyIds)
-                    }
-                    onScrollToComparisonRow={(rowKey) => {
-                      setDetailLayout('compare')
-                      requestAnimationFrame(() => scrollToComparisonRow(rowKey))
-                    }}
-                    onUnlinkPair={
-                      reconcileLocked || classificationReadOnly
-                        ? undefined
-                        : (pairId, matchSource) => handleUnlinkPair(pairId, matchSource)
-                    }
-                    onUnlinkGroup={
-                      reconcileLocked || classificationReadOnly
-                        ? undefined
-                        : (groupId) => void handleUnlinkGroup(groupId)
-                    }
-                  />
-                </>
-              ) : detailLayout === 'complete' ? (
-                <>
-                  <h3 className="subsection-title">
-                    Vista completa (
-                    {compareRowFilterActive
-                      ? `${filteredChronologicalRows.length} de ${comparisonRows.length}`
-                      : `${comparisonRows.length}`}{' '}
-                    filas)
-                  </h3>
-                  <CompleteViewLegendStatic />
-                  <CompareFiltersBar
-                    searchValue={compareSearchQuery}
-                    onSearchChange={setCompareSearchQuery}
-                    onSearchClear={() => setCompareSearchQuery('')}
-                    classificationValue={compareClassificationFilter}
-                    classificationOptions={classificationSuggestions}
-                    onClassificationChange={setCompareClassificationFilter}
-                    dateFrom={compareDateFrom}
-                    dateTo={compareDateTo}
-                    onDateFromChange={setCompareDateFrom}
-                    onDateToChange={setCompareDateTo}
-                    onClearDates={() => {
-                      setCompareDateFrom('')
-                      setCompareDateTo('')
-                    }}
-                    help={<CompleteViewHelpText />}
-                  />
-                  <ComparisonTable
-                    rows={filteredChronologicalRows}
-                    allRowsCount={comparisonRows.length}
-                    selectedId={selectedId}
-                    sessionId={selectedId}
-                    canShareInChat={canShareInChat}
-                    sessionClosed={sessionClosed}
-                    classificationReadOnly={classificationReadOnly}
-                    sessionAmountTolerance={effectiveSessionAmountTolerance}
-                    classificationSuggestions={classificationSuggestions}
-                    onUnlinkPair={(pairId, matchSource) => void handleUnlinkPair(pairId, matchSource)}
-                    onUnlinkGroup={
-                      classificationReadOnly ? undefined : (groupId) => void handleUnlinkGroup(groupId)
-                    }
-                    onSetClassification={(side, txId, c) =>
-                      void handleSetClassification(side, txId, c)
-                    }
-                    onSetPairClassification={(pairId, c) =>
-                      void handleSetPairClassification(pairId, c)
-                    }
-                    onSetGroupClassification={(groupId, c) =>
-                      void handleSetGroupClassification(groupId, c)
-                    }
-                    onOpenPendingComments={(t) => setCommentTarget(t)}
-                    onOpenPendingAttachments={(t) => setAttachmentTarget(t)}
-                    onInspectCounterpart={(req) => setCounterpartInspect(req)}
-                    onDeferMovement={
-                      classificationReadOnly ? undefined : (side, txId) => void handleDeferMovement(side, txId)
-                    }
-                  />
-                </>
-              ) : (
-                <>
-                  <h3 className="subsection-title">
-                    Tablas clásicas (
-                    {compareRowFilterActive
-                      ? `${classicFilteredPairRows.length + classicFilteredUnmatchedBank.length + classicFilteredUnmatchedCompany.length} de ${comparisonRows.length}`
-                      : `${comparisonRows.length} filas`}
-                    )
-                  </h3>
-                  <ComparisonLegend
-                    filter={compareFilter}
-                    onFilter={setCompareFilter}
-                    counts={compareCounts}
-                  />
-                  <CompareFiltersBar
-                    searchValue={compareSearchQuery}
-                    onSearchChange={setCompareSearchQuery}
-                    onSearchClear={() => setCompareSearchQuery('')}
-                    classificationValue={compareClassificationFilter}
-                    classificationOptions={classificationSuggestions}
-                    onClassificationChange={setCompareClassificationFilter}
-                    dateFrom={compareDateFrom}
-                    dateTo={compareDateTo}
-                    onDateFromChange={setCompareDateFrom}
-                    onDateToChange={setCompareDateTo}
-                    onClearDates={() => {
-                      setCompareDateFrom('')
-                      setCompareDateTo('')
-                    }}
-                    help={<ClassicViewHelpText />}
-                  />
-                  <h3 className="subsection-title">
-                    Pares encontrados (
-                    {compareRowFilterActive
-                      ? `${classicFilteredPairRows.length} de ${detail.pairs.length}`
-                      : `${detail.pairs.length}`}
-                    )
-                  </h3>
-                  {detail.pairs.length > 0 && classicFilteredPairRows.length === 0 ? (
-                    <p className="msg subtle">
-                      Ningún par coincide con el filtro actual (probá «Todos», otra búsqueda o ampliá
-                      fechas).
-                    </p>
-                  ) : (
-                    <div className="table-wrap table-wrap--scrollY">
-                      <table className="data-table">
-                        <thead>
-                          <tr>
-                            <th className="rownum-th" aria-label="Número de fila">
-                              #
-                            </th>
-                            <th>Origen</th>
-                            <th>Importe banco</th>
-                            <th>Importe empresa</th>
-                            <th>Fecha banco</th>
-                            <th>Fecha empresa</th>
-                            <th className="mov-clasif-th">Clasif.</th>
-                            <th className="mov-notes-th" scope="col" aria-label="Comentarios del par">
-                              <ConversationBubbleIcon className="comment-thread-svg comment-thread-svg--th" />
-                            </th>
-                            <th className="mov-notes-th" scope="col" aria-label="Adjuntos del par">
-                              <PaperclipIcon className="comment-thread-svg comment-thread-svg--th" />
-                            </th>
-                            <th scope="col" aria-label="Desvincular par"></th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {classicFilteredPairRows.map((row, idx) => {
-                            const { pair: p } = row
-                            return (
-                              <tr key={p.pairId}>
-                                <td className="rownum-td">{idx + 1}</td>
-                                <td>{p.matchSource}</td>
-                                <td>{p.bankAmount}</td>
-                                <td>{p.companyAmount}</td>
-                                <td className="cell-date-nowrap">{formatDisplayDate(p.bankDate)}</td>
-                                <td className="cell-date-nowrap">{formatDisplayDate(p.companyDate)}</td>
-                                <td className="mov-clasif-td">
-                                  <ClassificationCombo
-                                    value={p.classification ?? undefined}
-                                    suggestions={classificationSuggestions}
-                                    disabled={classificationReadOnly}
-                                    ariaLabel="Clasificación del par conciliado"
-                                    onCommit={(v) => void handleSetPairClassification(p.pairId, v)}
-                                  />
-                                </td>
-                                <td className="mov-notes-td">
-                                  <PendingConversationButton
-                                    commentCount={p.pairCommentCount ?? 0}
-                                    onClick={() =>
-                                      setCommentTarget({ kind: 'pair', pairId: p.pairId })
-                                    }
-                                  />
-                                </td>
-                                <td className="mov-notes-td">
-                                  <PendingAttachmentButton
-                                    attachmentCount={p.pairAttachmentCount ?? 0}
-                                    onClick={() =>
-                                      setAttachmentTarget({ kind: 'pair', pairId: p.pairId })
-                                    }
-                                  />
-                                </td>
-                                <td className="compare-td-unlink">
-                                  {selectedId != null && !sessionClosed && !classificationReadOnly ? (
-                                    <UnlinkPairButton
-                                      matchSource={p.matchSource === 'MANUAL' ? 'MANUAL' : 'AUTO'}
-                                      onClick={() =>
-                                        void handleUnlinkPair(
-                                          p.pairId,
-                                          p.matchSource === 'MANUAL' ? 'MANUAL' : 'AUTO',
-                                        )
-                                      }
-                                    />
-                                  ) : null}
-                                </td>
-                              </tr>
-                            )
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                  <MovimientosTable
-                    title="Pendientes banco"
-                    rows={classicFilteredUnmatchedBank}
-                    classificationSuggestions={classificationSuggestions}
-                    classificationLocked={classificationReadOnly}
-                    onClassificationChange={(txId, c) =>
-                      void handleSetClassification('bank', txId, c)
-                    }
-                    onOpenPendingComments={(txId) =>
-                      setCommentTarget({ kind: 'single', side: 'bank', txId })
-                    }
-                    onOpenPendingAttachments={(txId) =>
-                      setAttachmentTarget({ kind: 'single', side: 'bank', txId })
-                    }
-                  />
-                  <MovimientosTable
-                    title="Pendientes empresa (plataforma)"
-                    rows={classicFilteredUnmatchedCompany}
-                    classificationSuggestions={classificationSuggestions}
-                    classificationLocked={classificationReadOnly}
-                    onClassificationChange={(txId, c) =>
-                      void handleSetClassification('company', txId, c)
-                    }
-                    onOpenPendingComments={(txId) =>
-                      setCommentTarget({ kind: 'single', side: 'company', txId })
-                    }
-                    onOpenPendingAttachments={(txId) =>
-                      setAttachmentTarget({ kind: 'single', side: 'company', txId })
-                    }
-                  />
-                </>
-              )}
+              ) : null}
             </>
           )}
         </section>
@@ -5929,6 +5623,7 @@ export default function ConciliacionPage() {
           <PendingCommentsModal
             sessionId={selectedId}
             target={commentTarget}
+            detail={detail}
             sessionClosed={sessionClosed}
             onClose={() => setCommentTarget(null)}
             onAfterChange={() => {
@@ -5938,6 +5633,7 @@ export default function ConciliacionPage() {
           <PendingAttachmentsModal
             sessionId={selectedId}
             target={attachmentTarget}
+            detail={detail}
             sessionClosed={sessionClosed}
             onClose={() => setAttachmentTarget(null)}
             onAfterChange={() => {
