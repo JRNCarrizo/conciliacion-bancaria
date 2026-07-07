@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { createSessionCheckpoint } from './api/checkpoints'
 
 export function LogoutCheckpointModal({
@@ -24,7 +25,7 @@ export function LogoutCheckpointModal({
     return () => window.removeEventListener('keydown', onKey)
   }, [onCancel, saving])
 
-  return (
+  return createPortal(
     <div className="comment-modal-backdrop session-checkpoint-backdrop" role="presentation" onClick={onCancel}>
       <div
         className="comment-modal session-checkpoint-detail-modal session-checkpoint-logout-modal"
@@ -87,7 +88,8 @@ export function LogoutCheckpointModal({
           </div>
         </footer>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 

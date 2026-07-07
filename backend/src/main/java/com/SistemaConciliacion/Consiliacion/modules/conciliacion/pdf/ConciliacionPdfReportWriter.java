@@ -141,9 +141,9 @@ public final class ConciliacionPdfReportWriter {
 			drawSectionLandscape("Conciliados (" + pairs.size() + " pares)");
 			y -= 4;
 
-			String[] headers = { "F.banco", "F.emp.", "Par", "ID B", "ID E", "Ref.banco", "Desc.banco", "Ref.emp.",
-					"Desc.emp.", "Imp.banco", "Imp.emp.", "Neto cont.", "Clas.", "Estado", "Match" };
-			float[] cols = { 48, 48, 32, 28, 28, 54, 58, 54, 58, 46, 46, 46, 44, 46, 38 };
+			String[] headers = { "F.banco", "F.emp.", "Ref.banco", "Desc.banco", "Ref.emp.", "Desc.emp.",
+					"Imp.banco", "Imp.emp.", "Neto cont.", "Clas.", "Estado", "Match" };
+			float[] cols = { 52, 52, 62, 72, 62, 72, 50, 50, 50, 48, 48, 40 };
 			drawTableHeaderLandscape(headers, cols);
 
 			for (ParDto p : pairs) {
@@ -154,10 +154,9 @@ public final class ConciliacionPdfReportWriter {
 				}
 				BigDecimal acc = c.accountingAmount();
 				BigDecimal neto = acc != null ? acc : c.amount().negate();
-				String[] cells = { fmtFecha(b.txDate()), fmtFecha(c.txDate()), String.valueOf(p.pairId()),
-						String.valueOf(b.id()), String.valueOf(c.id()), clip(b.reference(), 18), clip(b.description(), 22),
-						clip(c.reference(), 18), clip(c.description(), 22), fmtMoney(b.amount()),
-						fmtMoney(c.amount()), fmtMoney(neto), clip(p.classification(), 12),
+				String[] cells = { fmtFecha(b.txDate()), fmtFecha(c.txDate()), clip(b.reference(), 18),
+						clip(b.description(), 22), clip(c.reference(), 18), clip(c.description(), 22),
+						fmtMoney(b.amount()), fmtMoney(c.amount()), fmtMoney(neto), clip(p.classification(), 12),
 						pairKindLabelEs(p.pairKind()), matchSourceLabel(p.matchSource()) };
 				if (y < MARGIN + 100f) {
 					closeCs();
@@ -177,16 +176,13 @@ public final class ConciliacionPdfReportWriter {
 			newLandscapePage();
 			drawSectionLandscape("Pendientes extracto - banco (" + rows.size() + " movimientos)");
 			y -= 4;
-			String[] headers = { "ID", "Fecha", "Importe", "Referencia", "Descripción", "Clasif.", "Dup.", "Sug.ID",
-					"Sugerencia", "Com." };
-			float[] cols = { 36, 54, 58, 72, 92, 52, 28, 36, 92, 28 };
+			String[] headers = { "Fecha", "Importe", "Referencia", "Descripción", "Clasif.", "Dup.", "Com." };
+			float[] cols = { 58, 62, 88, 120, 58, 32, 32 };
 			drawTableHeaderLandscape(headers, cols);
 			for (MovimientoDto m : rows) {
-				String[] cells = { String.valueOf(m.id()), fmtFecha(m.txDate()), fmtMoney(m.amount()),
-						clip(m.reference(), 20), clip(m.description(), 28), clip(m.pendingClassification(), 14),
-						m.duplicateInFile() ? "Sí" : "No",
-						m.fuzzyCounterpartId() == null ? "" : String.valueOf(m.fuzzyCounterpartId()),
-						clip(m.fuzzyHint(), 28), String.valueOf(m.commentCount()) };
+				String[] cells = { fmtFecha(m.txDate()), fmtMoney(m.amount()), clip(m.reference(), 20),
+						clip(m.description(), 28), clip(m.pendingClassification(), 14),
+						m.duplicateInFile() ? "Sí" : "No", String.valueOf(m.commentCount()) };
 				if (y < MARGIN + 100f) {
 					closeCs();
 					newLandscapePage();
@@ -205,18 +201,16 @@ public final class ConciliacionPdfReportWriter {
 			newLandscapePage();
 			drawSectionLandscape("Pendientes libro / plataforma - empresa (" + rows.size() + " movimientos)");
 			y -= 4;
-			String[] headers = { "ID", "Fecha", "Imp.conc.", "Neto cont.", "Referencia", "Descripción", "Clasif.",
-					"Dup.", "Sug.ID", "Sugerencia", "Com." };
-			float[] cols = { 34, 52, 54, 54, 68, 88, 48, 28, 34, 84, 26 };
+			String[] headers = { "Fecha", "Imp.conc.", "Neto cont.", "Referencia", "Descripción", "Clasif.", "Dup.",
+					"Com." };
+			float[] cols = { 56, 58, 58, 80, 110, 52, 32, 30 };
 			drawTableHeaderLandscape(headers, cols);
 			for (MovimientoDto m : rows) {
 				BigDecimal acc = m.accountingAmount();
 				BigDecimal neto = acc != null ? acc : m.amount().negate();
-				String[] cells = { String.valueOf(m.id()), fmtFecha(m.txDate()), fmtMoney(m.amount()),
-						fmtMoney(neto), clip(m.reference(), 18), clip(m.description(), 26),
-						clip(m.pendingClassification(), 12), m.duplicateInFile() ? "Sí" : "No",
-						m.fuzzyCounterpartId() == null ? "" : String.valueOf(m.fuzzyCounterpartId()),
-						clip(m.fuzzyHint(), 26), String.valueOf(m.commentCount()) };
+				String[] cells = { fmtFecha(m.txDate()), fmtMoney(m.amount()), fmtMoney(neto),
+						clip(m.reference(), 18), clip(m.description(), 26), clip(m.pendingClassification(), 12),
+						m.duplicateInFile() ? "Sí" : "No", String.valueOf(m.commentCount()) };
 				if (y < MARGIN + 100f) {
 					closeCs();
 					newLandscapePage();

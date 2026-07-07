@@ -213,9 +213,9 @@ public class ConciliacionExportService {
 
 	private static void writeConciliadosSheet(XSSFWorkbook wb, SessionDetailDto d) {
 		Sheet sh = wb.createSheet("Conciliados");
-		String[] headers = { "Fecha banco", "Fecha empresa", "ID par", "ID banco", "ID empresa", "Ref. banco",
-				"Descripción banco", "Ref. empresa", "Descripción empresa", "Importe banco", "Importe empresa",
-				"Neto contable (empresa)", "Clasificación", "Estado del par", "Match" };
+		String[] headers = { "Fecha banco", "Fecha empresa", "Ref. banco", "Descripción banco", "Ref. empresa",
+				"Descripción empresa", "Importe banco", "Importe empresa", "Neto contable (empresa)", "Clasificación",
+				"Estado del par", "Match" };
 		Row h = sh.createRow(0);
 		for (int i = 0; i < headers.length; i++) {
 			h.createCell(i).setCellValue(headers[i]);
@@ -235,9 +235,6 @@ public class ConciliacionExportService {
 			int col = 0;
 			row.createCell(col++).setCellValue(fmtFecha(b.txDate()));
 			row.createCell(col++).setCellValue(fmtFecha(c.txDate()));
-			row.createCell(col++).setCellValue(p.pairId());
-			row.createCell(col++).setCellValue(b.id());
-			row.createCell(col++).setCellValue(c.id());
 			row.createCell(col++).setCellValue(emptyToBlank(b.reference()));
 			row.createCell(col++).setCellValue(emptyToBlank(b.description()));
 			row.createCell(col++).setCellValue(emptyToBlank(c.reference()));
@@ -285,8 +282,8 @@ public class ConciliacionExportService {
 
 	private static void writePendientesBancoSheet(XSSFWorkbook wb, List<MovimientoDto> bank) {
 		Sheet sh = wb.createSheet("Pendientes banco");
-		String[] headers = { "ID", "Fecha", "Importe", "Referencia", "Descripción", "Clasificación", "Duplicado",
-				"Match sugerido (ID)", "Match sugerido (texto)", "Nº comentarios" };
+		String[] headers = { "Fecha", "Importe", "Referencia", "Descripción", "Clasificación", "Duplicado",
+				"Nº comentarios" };
 		Row h = sh.createRow(0);
 		for (int i = 0; i < headers.length; i++) {
 			h.createCell(i).setCellValue(headers[i]);
@@ -304,22 +301,19 @@ public class ConciliacionExportService {
 
 	private static void writePendienteBancoRow(Row row, MovimientoDto m) {
 		int col = 0;
-		row.createCell(col++).setCellValue(m.id());
 		row.createCell(col++).setCellValue(fmtFecha(m.txDate()));
 		row.createCell(col++).setCellValue(m.amount().doubleValue());
 		row.createCell(col++).setCellValue(emptyToBlank(m.reference()));
 		row.createCell(col++).setCellValue(emptyToBlank(m.description()));
 		row.createCell(col++).setCellValue(emptyToBlank(m.pendingClassification()));
 		row.createCell(col++).setCellValue(m.duplicateInFile() ? "Sí" : "No");
-		row.createCell(col++).setCellValue(m.fuzzyCounterpartId() == null ? "" : String.valueOf(m.fuzzyCounterpartId()));
-		row.createCell(col++).setCellValue(emptyToBlank(m.fuzzyHint()));
 		row.createCell(col++).setCellValue(m.commentCount());
 	}
 
 	private static void writePendientesEmpresaSheet(XSSFWorkbook wb, List<MovimientoDto> comp) {
 		Sheet sh = wb.createSheet("Pendientes empresa");
-		String[] headers = { "ID", "Fecha", "Importe (conciliación)", "Neto contable", "Referencia", "Descripción",
-				"Clasificación", "Duplicado", "Match sugerido (ID)", "Match sugerido (texto)", "Nº comentarios" };
+		String[] headers = { "Fecha", "Importe (conciliación)", "Neto contable", "Referencia", "Descripción",
+				"Clasificación", "Duplicado", "Nº comentarios" };
 		Row h = sh.createRow(0);
 		for (int i = 0; i < headers.length; i++) {
 			h.createCell(i).setCellValue(headers[i]);
@@ -337,7 +331,6 @@ public class ConciliacionExportService {
 
 	private static void writePendienteEmpresaRow(Row row, MovimientoDto m) {
 		int col = 0;
-		row.createCell(col++).setCellValue(m.id());
 		row.createCell(col++).setCellValue(fmtFecha(m.txDate()));
 		row.createCell(col++).setCellValue(m.amount().doubleValue());
 		BigDecimal acc = m.accountingAmount();
@@ -347,8 +340,6 @@ public class ConciliacionExportService {
 		row.createCell(col++).setCellValue(emptyToBlank(m.description()));
 		row.createCell(col++).setCellValue(emptyToBlank(m.pendingClassification()));
 		row.createCell(col++).setCellValue(m.duplicateInFile() ? "Sí" : "No");
-		row.createCell(col++).setCellValue(m.fuzzyCounterpartId() == null ? "" : String.valueOf(m.fuzzyCounterpartId()));
-		row.createCell(col++).setCellValue(emptyToBlank(m.fuzzyHint()));
 		row.createCell(col++).setCellValue(m.commentCount());
 	}
 
@@ -357,8 +348,8 @@ public class ConciliacionExportService {
 
 	private static void writeDetalleCompletoSheet(XSSFWorkbook wb, SessionDetailDto d) {
 		Sheet sh = wb.createSheet("Detalle completo");
-		String[] headers = { "ID", "Fecha", "Origen", "Referencia", "Descripción", "Importe (conciliación)",
-				"Neto contable", "Estado", "ID par", "Match", "Nº comentarios" };
+		String[] headers = { "Fecha", "Origen", "Referencia", "Descripción", "Importe (conciliación)",
+				"Neto contable", "Estado", "Match", "Nº comentarios" };
 		Row h = sh.createRow(0);
 		for (int i = 0; i < headers.length; i++) {
 			h.createCell(i).setCellValue(headers[i]);
@@ -386,7 +377,6 @@ public class ConciliacionExportService {
 			boolean bank = line.bankSide();
 			Row row = sh.createRow(r++);
 			int col = 0;
-			row.createCell(col++).setCellValue(m.id());
 			row.createCell(col++).setCellValue(fmtFecha(m.txDate()));
 			row.createCell(col++).setCellValue(bank ? "Banco" : "Empresa");
 			row.createCell(col++).setCellValue(emptyToBlank(m.reference()));
@@ -402,11 +392,9 @@ public class ConciliacionExportService {
 			Long pairId = bank ? bankToPair.get(m.id()) : companyToPair.get(m.id());
 			if (pairId != null) {
 				row.createCell(col++).setCellValue("Conciliado");
-				row.createCell(col++).setCellValue(pairId);
 				row.createCell(col++).setCellValue(matchSourceLabel(pairMatch.get(pairId)));
 			} else {
 				row.createCell(col++).setCellValue(bank ? "Pendiente banco" : "Pendiente empresa");
-				row.createCell(col++).setCellValue("");
 				row.createCell(col++).setCellValue("");
 			}
 			row.createCell(col++).setCellValue(m.commentCount());
