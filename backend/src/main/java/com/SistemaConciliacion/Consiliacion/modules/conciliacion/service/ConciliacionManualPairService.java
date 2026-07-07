@@ -1,0 +1,135 @@
+package com.SistemaConciliacion.Consiliacion.modules.conciliacion.service;
+
+import java.util.List;
+import java.util.Optional;
+
+import org.springframework.http.HttpStatus;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
+
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.api.dto.ManualPairResponseDto;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.BankTransaction;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.CompanyTransaction;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.MatchSource;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.PendingMovementSide;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.ReconciliationPair;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.ReconciliationSession;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.SessionAuditEventType;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.domain.SessionStatus;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.repository.BankTransactionRepository;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.repository.CompanyTransactionRepository;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.repository.ReconciliationPairCommentRepository;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.repository.ReconciliationPairRepository;
+import com.SistemaConciliacion.Consiliacion.modules.conciliacion.repository.ReconciliationSessionRepository;
+
+@Service
+public class ConciliacionManualPairService {
+
+	private final ReconciliationSessionRepository sessionRepository;
+	private final BankTransactionRepository bankTransactionRepository;
+	private final CompanyTransactionRepository companyTransactionRepository;
+	private final ReconciliationPairRepository reconciliationPairRepository;
+	private final ReconciliationPairCommentRepository reconciliationPairCommentRepository;
+	private final PairAttachmentService pairAttachmentService;
+	private final SessionAuditService sessionAuditService;
+	private final MovementMatchService movementMatchService;
+	private final ConciliacionGroupService conciliacionGroupService;
+
+	public ConciliacionManualPairService(ReconciliationSessionRepository sessionRepository,
+			BankTransactionRepository bankTransactionRepository,
+			CompanyTransactionRepository companyTransactionRepository,
+			ReconciliationPairRepository reconciliationPairRepository,
+			ReconciliationPairCommentRepository reconciliationPairCommentRepository,
+			PairAttachmentService pairAttachmentService, SessionAuditService sessionAuditService,
+			MovementMatchService movementMatchService, ConciliacionGroupService conciliacionGroupService) {
+		this.sessionRepository = sessionRepository;
+		this.bankTransactionRepository = bankTransactionRepository;
+		this.companyTransactionRepository = companyTransactionRepository;
+		this.reconciliationPairRepository = reconciliationPairRepository;
+		this.reconciliationPairCommentRepository = reconciliationPairCommentRepository;
+		this.pairAttachmentService = pairAttachmentService;
+		this.sessionAuditService = sessionAuditService;
+		this.movementMatchService = movementMatchService;
+		this.conciliacionGroupService = conciliacionGroupService;
+	}
+
+	@Transactional
+	public ManualPairResponseDto createManualPair(long sessionId, long bankTransactionId, long companyTransactionId) {
+		ReconciliationSession session = sessionRepository.findById(sessionId)
+				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sesión no encontrada"));
+		if (session.getStatus() == SessionStatus.CLOSED) {
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "La conciliación está cerrada; no se pueden crear pares.");
+		}
+
+		BankTransaction bank = bankTransactionRepository.findByIdAndSession_Id(bankTransactionId, sessionId)
+				.orElseThrow(() -> new IllegalArgumentException("Movimiento de banco no pertenece a esta sesión."));
+		CompanyTransaction company = companyTransactionRepository.findByIdAndSession_Id(companyTransactionId, sessionId)
+				.orElseThrow(() -> new IllegalArgumentException("Movimiento de empresa no pertenece a esta sesión."));
+
+		movementMatchService.assertBankUnmatched(bank.getId());
+		movementMatchService.assertCompanyUnmatched(company.getId());
+
+		ReconciliationPair p = new ReconciliationPair();
+		p.setSession(session);
+		p.setBankTransaction(bank);
+		p.setCompanyTransaction(company);
+		p.setMatchSource(MatchSource.MANUAL);
+		p = reconciliationPairRepository.save(p);
+
+		session.setStatus(SessionStatus.RECONCILED);
+		sessionRepository.save(session);
+
+		return new ManualPairResponseDto(p.getId(), sessionId, MatchSource.MANUAL.name());
+	}
+
+	@Transactional
+	public void deletePair(long sessionId, long pairId) {
+		ReconciliationSession session = sessionRepository.findById(sessionId)
+				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sesión no encontrada"));
+		if (session.getStatus() == SessionStatus.CLOSED) {
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "La conciliación está cerrada; no se pueden quitar pares.");
+		}
+		ReconciliationPair p = reconciliationPairRepository.findByIdAndSession_Id(pairId, sessionId)
+				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Par no encontrado."));
+		long bankId = p.getBankTransaction().getId();
+		long companyId = p.getCompanyTransaction().getId();
+		String source = p.getMatchSource() == MatchSource.MANUAL ? "manual" : "automático";
+		pairAttachmentService.deleteStoredFilesForPairs(sessionId, List.of(pairId));
+		reconciliationPairCommentRepository.deleteByPair_Id(pairId);
+		reconciliationPairRepository.delete(p);
+		sessionAuditService.append(sessionId, SessionAuditEventType.UNLINK_PAIR,
+				String.format("Par %d · %s · banco %d · empresa %d", pairId, source, bankId, companyId));
+	}
+
+	/**
+	 * Quita el par que contiene el movimiento, si existe. Sin auditoría (p. ej. reimportación en lote).
+	 *
+	 * @return true si se eliminó un par
+	 */
+	@Transactional
+	public boolean unlinkPairForMovementSilent(long sessionId, PendingMovementSide side, long txId) {
+		Optional<ReconciliationPair> found = side == PendingMovementSide.BANK
+				? reconciliationPairRepository.findByBankTransaction_Id(txId)
+				: reconciliationPairRepository.findByCompanyTransaction_Id(txId);
+		if (found.isEmpty() || found.get().getSession().getId() != sessionId) {
+			return false;
+		}
+		ReconciliationPair p = found.get();
+		pairAttachmentService.deleteStoredFilesForPairs(sessionId, List.of(p.getId()));
+		reconciliationPairCommentRepository.deleteByPair_Id(p.getId());
+		reconciliationPairRepository.delete(p);
+		return true;
+	}
+
+	/**
+	 * Quita par o grupo que contiene el movimiento. Sin auditoría (p. ej. reimportación en lote).
+	 */
+	@Transactional
+	public boolean unlinkAnyForMovementSilent(long sessionId, PendingMovementSide side, long txId) {
+		if (unlinkPairForMovementSilent(sessionId, side, txId)) {
+			return true;
+		}
+		return conciliacionGroupService.unlinkGroupForMovementSilent(sessionId, side, txId);
+	}
+}

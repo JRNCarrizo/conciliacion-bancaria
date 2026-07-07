@@ -1,0 +1,32 @@
+---
+description: Arquitectura modular del repo — backend, frontend y escalado
+alwaysApply: true
+---
+
+# Plataforma (escalado)
+
+## Objetivo
+
+Suite de herramientas de gestión/contable: nuevos dominios deben sumarse **sin mezclar** con los existentes.
+
+## Backend (Java / Spring)
+
+- **`modules/auth/`**: login, JWT, usuarios (`AppUser`), gestión de usuarios, roles. API bajo `/api/v1/auth` y usuarios según `UserController`.
+- **`modules/conciliacion/`**: solo dominio de conciliación (sesiones, import, matching, export, adjuntos, auditoría de sesión, etc.). API bajo `/api/v1/conciliacion`.
+- **Nuevo módulo**: nuevo paquete `modules/<nombre>/` con `api`, `domain`, `service`, `repository`; migraciones Flyway propias o prefijo claro. No acoplar lógica de negocio de un módulo dentro de otro salvo casos transversales (auth).
+
+## Frontend (React / Vite)
+
+- **`auth/`**: `AuthContext`, sesión y token para `apiFetch`.
+- **`pages/`**: pantallas globales (login, setup, home, **Usuarios**). La gestión de usuarios **no** está en conciliación.
+- **`features/conciliacion/`**: UI y lógica del producto conciliación (`ConciliacionPage`, types, utils, CSS). **No** mezclar aquí otras herramientas.
+- **Nueva herramienta**: nueva carpeta `features/<nombre>/`, ruta en `App.tsx`, entrada en navbar/layout. Reutilizar `api/client` y auth.
+- **Deuda conocida**: `ConciliacionPage.tsx` es grande; al tocar conciliación, preferir **extraer** subcomponentes dentro de `features/conciliacion/` en lugar de seguir inflando un solo archivo.
+
+## Convención rápida
+
+| Qué | Dónde |
+|-----|--------|
+| Usuarios / roles | Backend `modules/auth`, front `UsuariosPage` + rutas protegidas |
+| Conciliación bancaria | `modules/conciliacion`, `features/conciliacion` |
+| Próxima herramienta | Nuevo `modules/...` + nuevo `features/...` |

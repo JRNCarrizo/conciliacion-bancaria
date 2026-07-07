@@ -1,0 +1,180 @@
+/* Tema claro (explícito) y oscuro (predeterminado de la app — mismo aspecto que antes en modo oscuro del SO) */
+html {
+  --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
+  --heading: system-ui, 'Segoe UI', Roboto, sans-serif;
+  --mono: ui-monospace, Consolas, monospace;
+}
+
+html[data-theme='light'] {
+  color-scheme: light;
+  /* Fondo de página blanco; paneles en --surface para separar bloques */
+  --text: #3f3a47;
+  --text-h: #0c0a10;
+  --bg: #ffffff;
+  --surface: #fafaf8;
+  --border: #9a939f;
+  --code-bg: #c4beb2;
+  --accent: #9429e0;
+  --accent-bg: rgba(148, 41, 224, 0.18);
+  --accent-border: rgba(148, 41, 224, 0.45);
+  --social-bg: #c9c3b6;
+  --shadow:
+    rgba(0, 0, 0, 0.1) 0 1px 3px,
+    rgba(0, 0, 0, 0.09) 0 8px 20px -4px;
+
+  --compare-auto: rgba(22, 163, 74, 0.28);
+  --compare-manual: rgba(37, 99, 235, 0.26);
+  /* Naranja — pendiente banco */
+  --compare-pend-bank: rgba(234, 88, 12, 0.26);
+  --compare-pend-company: rgba(219, 39, 119, 0.24);
+  /* Índigo — brecha Δ importe (ni verde auto ni azul manual ni naranja pend. banco) */
+  --compare-amount-gap: rgba(79, 70, 229, 0.26);
+  --compare-opp-sign: rgba(220, 38, 38, 0.24);
+  --compare-split: #000;
+}
+
+html[data-theme='dark'] {
+  color-scheme: dark;
+  --text: #9ca3af;
+  --text-h: #f3f4f6;
+  --bg: #16171d;
+  --surface: #16171d;
+  --border: #2e303a;
+  --code-bg: #1f2028;
+  --accent: #c084fc;
+  --accent-bg: rgba(192, 132, 252, 0.15);
+  --accent-border: rgba(192, 132, 252, 0.5);
+  --social-bg: rgba(47, 48, 58, 0.5);
+  --shadow:
+    rgba(0, 0, 0, 0.4) 0 10px 15px -3px, rgba(0, 0, 0, 0.25) 0 4px 6px -2px;
+
+  --compare-auto: rgba(34, 197, 94, 0.2);
+  --compare-manual: rgba(96, 165, 250, 0.22);
+  /* Naranja — pendiente banco (vs amarillo/ámbar que era casi Δ importe) */
+  --compare-pend-bank: rgba(249, 115, 22, 0.24);
+  --compare-pend-company: rgba(244, 114, 182, 0.2);
+  /* Índigo — brecha Δ importe */
+  --compare-amount-gap: rgba(99, 102, 241, 0.22);
+  --compare-opp-sign: rgba(248, 113, 113, 0.18);
+  --compare-split: #fff;
+  --compare-grid: rgba(255, 255, 255, 0.32);
+}
+
+html[data-theme='dark'] #social .button-icon {
+  filter: invert(1) brightness(2);
+}
+
+html {
+  font: 18px/145% var(--sans);
+  letter-spacing: 0.18px;
+  color: var(--text);
+  background: var(--bg);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: clip;
+}
+
+@media (max-width: 1024px) {
+  html {
+    font-size: 16px;
+  }
+}
+
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.45rem;
+  min-width: 2.5rem;
+  min-height: 2.5rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--code-bg) 92%, var(--bg));
+  color: var(--text-h);
+  cursor: pointer;
+  font-family: inherit;
+  box-shadow: var(--shadow);
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    transform 0.1s ease;
+}
+
+.theme-toggle__icon {
+  flex-shrink: 0;
+  display: block;
+}
+
+.theme-toggle:hover {
+  border-color: var(--accent-border);
+  background: var(--accent-bg);
+}
+
+.theme-toggle:active {
+  transform: scale(0.98);
+}
+
+.theme-toggle:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+#root {
+  max-width: 100%;
+  margin: 0 auto;
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  overflow-x: clip;
+}
+
+h1,
+h2 {
+  font-family: var(--heading);
+  font-weight: 500;
+  color: var(--text-h);
+}
+
+h1 {
+  font-size: 56px;
+  letter-spacing: -1.68px;
+  margin: 32px 0;
+  @media (max-width: 1024px) {
+    font-size: 36px;
+    margin: 20px 0;
+  }
+}
+h2 {
+  font-size: 24px;
+  line-height: 118%;
+  letter-spacing: -0.24px;
+  margin: 0 0 8px;
+  @media (max-width: 1024px) {
+    font-size: 20px;
+  }
+}
+p {
+  margin: 0;
+}
+
+code,
+.counter {
+  font-family: var(--mono);
+  display: inline-flex;
+  border-radius: 4px;
+  color: var(--text-h);
+}
+
+code {
+  font-size: 15px;
+  line-height: 135%;
+  padding: 4px 8px;
+  background: var(--code-bg);
+}
